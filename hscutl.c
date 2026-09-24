@@ -841,6 +841,14 @@ int set_socket_keepalive( int sfd,
     struct protoent * tcpproto;
 
     /* Retrieve TCP protocol value (mostly for FreeBSD portability) */
+#if defined( __GENODE__ )
+    /* Genode has no protocols database, so getprotobyname() always fails and
+       this function would return -1 without configuring keepalive at all.
+       The lookup only ever wants IPPROTO_TCP, which is a fixed, assigned
+       number -- 6 -- not a host-specific value. Use it directly. */
+    UNREFERENCED( tcpproto );
+    l_tcp = IPPROTO_TCP;
+#else
     tcpproto = getprotobyname("tcp");
     if (!tcpproto)
     {
@@ -852,6 +860,7 @@ int set_socket_keepalive( int sfd,
         }
     }
     l_tcp = tcpproto->p_proto;
+#endif
 
     optval = 1;
   #if defined( HAVE_DECL_SO_KEEPALIVE ) && HAVE_DECL_SO_KEEPALIVE
@@ -953,6 +962,14 @@ int get_socket_keepalive( int sfd, int* idle_time, int* probe_interval,
     socklen_t  optlen = sizeof( optval );
 
     /* Retrieve TCP protocol value (mostly for FreeBSD portability) */
+#if defined( __GENODE__ )
+    /* Genode has no protocols database, so getprotobyname() always fails and
+       this function would return -1 without configuring keepalive at all.
+       The lookup only ever wants IPPROTO_TCP, which is a fixed, assigned
+       number -- 6 -- not a host-specific value. Use it directly. */
+    UNREFERENCED( tcpproto );
+    l_tcp = IPPROTO_TCP;
+#else
     tcpproto = getprotobyname("tcp");
     if (!tcpproto)
     {
@@ -964,6 +981,7 @@ int get_socket_keepalive( int sfd, int* idle_time, int* probe_interval,
         }
     }
     l_tcp = tcpproto->p_proto;
+#endif
 #else
     UNREFERENCED( sfd );
 #endif // HAVE_FULL_KEEPALIVE || HAVE_PARTIAL_KEEPALIVE
@@ -2592,6 +2610,16 @@ DLL_EXPORT bool are_big_endian()
 
 #if !defined( _MSVC_ ) // Linux, etc..
 
+#if defined( __GENODE__ )
+
+/* Genode has neither ptrace nor sysctl, and no debugger-detection
+   concept at all. Note that Genode's libc defines __FreeBSD__, so
+   without this branch the BSD sysctl path would be taken. */
+static bool IsDebuggerPresent() { return false; }
+
+#else
+
+
 #include <sys/ptrace.h>
 
 #if defined( __APPLE__ ) || defined( __FreeBSD__ )
@@ -2674,6 +2702,8 @@ static bool IsDebuggerPresent()
 #endif
 
 } // IsDebuggerPresent
+
+#endif // __GENODE__
 
 #endif // !MSVC
 
