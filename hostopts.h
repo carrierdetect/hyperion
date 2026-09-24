@@ -289,6 +289,51 @@
 
 
 /*-------------------------------------------------------------------*/
+/* Hard-coded Genode-specific features and options...                */
+/*-------------------------------------------------------------------*/
+/* MUST precede the FreeBSD test below: Genode's libc build adds      */
+/* -D__FreeBSD__=12, so without this Hercules takes the BSD path and  */
+/* calls sysctl(), which Genode does not implement. The same import   */
+/* file adds -D__GENODE__, which is the reliable discriminator.       */
+#elif defined(__GENODE__)
+
+#define DLL_IMPORT              extern
+#define DLL_EXPORT
+#define INL_DLL_IMPORT
+#define INL_DLL_EXPORT          extern
+#undef  OPTION_SCSI_ERASE_TAPE
+#undef  OPTION_SCSI_ERASE_GAP
+#define MAX_DEVICE_THREADS          0
+#define MIXEDCASE_FILENAMES_ARE_UNIQUE
+/* Genode has neither fork nor a shell. hscmisc.c rejects any value   */
+/* outside the defined set, so use the ANSI system() form: it compiles */
+/* and the sh command simply fails at runtime, which is correct.      */
+#define HOW_TO_IMPLEMENT_SH_COMMAND       USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
+#define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
+#undef  OPTION_EXTCURS
+#define SCANDIR_CONST_STRUCT_DIRENT
+
+/* The LCS adapter and the host interface share one MAC address.      */
+/*                                                                    */
+/* Without this, LCS_LanStats() hands the guest pLCSPORT->MAC_Address */
+/* with the last byte incremented, on the reasoning (see the Windows  */
+/* section above) that a TUN/TAP host end and the guest end are two   */
+/* separate interfaces and so must not share an address.              */
+/*                                                                    */
+/* On Genode they are not two interfaces. vfs_tap in Nic mode is one  */
+/* Nic session, nic_router assigns it one MAC, and that session is    */
+/* the guest's adapter -- there is no host-side interface to clash    */
+/* with. Incrementing therefore gives the guest an address its own    */
+/* switch has never heard of: Linux brings up ...:02 while the router */
+/* delivers only to ...:01, so every inbound frame is dropped and the */
+/* fault looks like a dead adapter rather than a wrong address.       */
+/*                                                                    */
+/* Windows sets this for the same reason: there, too, the TAP is the  */
+/* guest's adapter rather than a peer of it.                          */
+#define OPTION_TUNTAP_LCS_SAME_ADDR   1
+
+
+/*-------------------------------------------------------------------*/
 /* Hard-coded FreeBSD/NetBSD-specific features and options...        */
 /*-------------------------------------------------------------------*/
 #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
