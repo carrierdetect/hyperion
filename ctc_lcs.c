@@ -952,6 +952,18 @@ void  LCS_StartChannelProgram( DEVBLK* pDEVBLK )
     pLCSDEV = (PLCSDEV)pDEVBLK->dev_data;
     if (!pLCSDEV) return;  // (incomplete group?)
 
+    /* A new read channel program starts with no halt outstanding. Without
+       this, the flag set in lcs_halt_or_clear() could leak a halt from a
+       finished program into the next one. Read subchannel only, for the same
+       reason the flag is only set for it: the LCSDEV is shared by the pair
+       and only LCS_Read() consumes the flag. */
+    if (pLCSDEV->pDEVBLK[ LCS_READ_SUBCHANN ] == pDEVBLK)
+    {
+        obtain_lock( &pLCSDEV->DevEventLock );
+        pLCSDEV->fHaltOrClear = 0;
+        release_lock( &pLCSDEV->DevEventLock );
+    }
+
     if (pLCSDEV->bMode == LCSDEV_MODE_SNA)
     {
         pLCSDEV->fChanProgActive = TRUE;
@@ -2914,7 +2926,33 @@ static void lcs_halt_or_clear( DEVBLK* pDEVBLK )
     PLCSDEV pLCSDEV = (PLCSDEV) pDEVBLK->dev_data;
     obtain_lock( &pLCSDEV->DevEventLock );
     {
-        if (pLCSDEV->fReadWaiting)
+        /* Record the halt unconditionally, then wake any waiter.
+
+           This used to act only "if (pLCSDEV->fReadWaiting)", which loses
+           every halt that arrives while LCS_Read is between iterations --
+           after it released DevEventLock and before it set fReadWaiting
+           again. A lost halt is not a delayed halt: the read never returns
+           halt status, so the channel program stays active until a frame
+           happens to arrive, the subchannel stays busy, and every later
+           ccw_device_start() from the guest fails with EBUSY. In Linux that
+           is
+
+               lcs 0.0.0e20: Starting an LCS device resulted in an error, rc=-16!
+               lcs: Error in opening device!
+
+           which no amount of retrying clears, because nothing ends the stuck
+           read. LCS_Read now tests the flag before waiting as well, so a halt
+           recorded here is acted on either immediately or on the next pass.
+
+           Only for the read subchannel. fHaltOrClear lives in the LCSDEV,
+           which both subchannels of the pair share, and only LCS_Read()
+           consumes it -- so recording a halt of the write subchannel here
+           would abort an unrelated read. That shows up as the write channel
+           failing afterwards:
+
+               lcs 0.0.0e20: Sending data from the LCS device to the LAN
+                             failed with rc=-22 */
+        if (pLCSDEV->pDEVBLK[ LCS_READ_SUBCHANN ] == pDEVBLK)
         {
             pLCSDEV->fHaltOrClear = 1;
             signal_condition( &pLCSDEV->DevEvent );
@@ -2973,12 +3011,19 @@ void  LCS_Read( DEVBLK* pDEVBLK,   U32   sCount,
         obtain_lock( &pLCSDEV->DevEventLock );
         PTT_DEBUG(       "GOT  DevEventLock ", 000, pDEVBLK->devnum, -1 );
         {
-            PTT_DEBUG( "WAIT DevEventLock ", 000, pDEVBLK->devnum, -1 );
-            pLCSDEV->fReadWaiting = 1;
-            timed_wait_condition( &pLCSDEV->DevEvent,
-                                  &pLCSDEV->DevEventLock,
-                                  &waittime );
-            pLCSDEV->fReadWaiting = 0;
+            /* Do not wait if a halt was recorded while we were not waiting.
+               The check below then acts on it at once, instead of sitting
+               here for DEF_NET_READ_TIMEOUT_SECS with the subchannel busy
+               and the guest's next ccw_device_start() failing EBUSY. */
+            if (!pLCSDEV->fHaltOrClear)
+            {
+                PTT_DEBUG( "WAIT DevEventLock ", 000, pDEVBLK->devnum, -1 );
+                pLCSDEV->fReadWaiting = 1;
+                timed_wait_condition( &pLCSDEV->DevEvent,
+                                      &pLCSDEV->DevEventLock,
+                                      &waittime );
+                pLCSDEV->fReadWaiting = 0;
+            }
         }
 
         PTT_DEBUG(        "WOKE DevEventLock ", 000, pDEVBLK->devnum, -1 );
