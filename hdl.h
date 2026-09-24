@@ -57,6 +57,39 @@ typedef const char* DEVEQU( const char* typname );
 typedef void        INSSEC( DEFINS* defins );
 typedef int         FINSEC();
 
+#if defined( __GENODE__ )
+/*-------------------------------------------------------------------*/
+/*         HDLSTATMOD  --  statically linked module registry         */
+/*-------------------------------------------------------------------*/
+/*  Genode has no dlopen, so HDL modules are linked into the         */
+/*  executable. Every module defines the SAME fixed entry-point      */
+/*  symbol names, so more than one can only be linked if those names */
+/*  are made distinct -- which target.mk does per file, at compile   */
+/*  time, with -Dhdl_define_devtypes_ep=<module>_hdl_ddev and the    */
+/*  like. This table is how hdl_main finds them again.               */
+/*                                                                   */
+/*  Entries may be NULL: a module need not define every section, so  */
+/*  the port declares them weak and an absent one simply resolves to */
+/*  NULL, exactly as dlsym() would have returned for a real module.  */
+/*-------------------------------------------------------------------*/
+
+typedef struct HDLSTATMOD
+{
+    const char*  name;
+    DEPSEC*      depsec_ep;
+    REGSEC*      regsec_ep;
+    RESSEC*      ressec_ep;
+    DEVSEC*      devsec_ep;
+    INSSEC*      inssec_ep;
+    FINSEC*      finsec_ep;
+}
+HDLSTATMOD;
+
+/* Defined by the port (genode_hdl_modules.c), NULL-terminated. */
+extern HDLSTATMOD hdl_static_modules[];
+
+#endif /* __GENODE__ */
+
 /*-------------------------------------------------------------------*/
 /*                HDLSHUT  --  Shutdown handling                     */
 /*-------------------------------------------------------------------*/

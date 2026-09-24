@@ -22,8 +22,10 @@
 
 HDLPRE hdl_preload[] =
 {
+#if !defined( __GENODE__ )
     { "hdteq",              HDL_LOAD_NOMSG                     },
     { "dyncrypt",           HDL_LOAD_NOMSG                     },
+#endif
 
     //                      (examples...)
 #if 0
@@ -58,10 +60,10 @@ static DEVHND*     hdl_real_fba_DEVHND;     /* FBA devices DEVHND    */
 /*-------------------------------------------------------------------*/
 /*         Internal entry-point functions forward references         */
 /*-------------------------------------------------------------------*/
-static int   hdl_check_depends_ep    ( DEPCHK* depchk );
-static void  hdl_register_symbols_ep ( REGSYM* regsym );
-static void  hdl_resolve_symbols_ep  ( GETSYM* getsym );
-static void  hdl_define_devtypes_ep  ( DEFDEV* defdev );
+static int   hdl_builtin_depends_ep  ( DEPCHK* depchk );
+static void  hdl_builtin_regsyms_ep  ( REGSYM* regsym );
+static void  hdl_builtin_ressyms_ep  ( GETSYM* getsym );
+static void  hdl_builtin_devtypes_ep ( DEFDEV* defdev );
 
 /*-------------------------------------------------------------------*/
 /*           HDL user callback functions forward references          */
@@ -119,10 +121,10 @@ DLL_EXPORT int hdl_main
     hdl_curmod->name       =  strdup( "*Hercules" );
     hdl_curmod->flags      =  (HDL_LOAD_MAIN | HDL_LOAD_NOUNLOAD);
 
-    hdl_curmod->depsec_ep  =  hdl_check_depends_ep;
-    hdl_curmod->regsec_ep  =  hdl_register_symbols_ep;
-    hdl_curmod->ressec_ep  =  hdl_resolve_symbols_ep;
-    hdl_curmod->devsec_ep  =  hdl_define_devtypes_ep;
+    hdl_curmod->depsec_ep  =  hdl_builtin_depends_ep;
+    hdl_curmod->regsec_ep  =  hdl_builtin_regsyms_ep;
+    hdl_curmod->ressec_ep  =  hdl_builtin_ressyms_ep;
+    hdl_curmod->devsec_ep  =  hdl_builtin_devtypes_ep;
     hdl_curmod->inssec_ep  =  NULL;
     hdl_curmod->finsec_ep  =  NULL;
 
@@ -133,7 +135,7 @@ DLL_EXPORT int hdl_main
     hdl_mods               =  hdl_curmod;
 
     /* Create default dependency chain */
-    VERIFY( hdl_check_depends_ep( &hdl_check_depends_cb ) == 0);
+    VERIFY( hdl_builtin_depends_ep( &hdl_check_depends_cb ) == 0);
 
     /*
     **  Create an initial symbols list by manualy registering
@@ -141,11 +143,103 @@ DLL_EXPORT int hdl_main
     */
     obtain_lock( &hdl_lock );
     {
-        hdl_register_symbols_ep ( &hdl_register_symbols_cb );
-        hdl_resolve_symbols_ep  ( &hdl_resolve_symbols_cb  );
-        hdl_define_devtypes_ep  ( &hdl_define_devtypes_cb  );
+        hdl_builtin_regsyms_ep  ( &hdl_register_symbols_cb );
+        hdl_builtin_ressyms_ep  ( &hdl_resolve_symbols_cb  );
+        hdl_builtin_devtypes_ep ( &hdl_define_devtypes_cb  );
     }
     release_lock( &hdl_lock );
+
+#if defined( __GENODE__ )
+    /*
+    **  Register the statically linked HDL modules.
+    **
+    **  Genode has no dlopen, so device modules are linked into the
+    **  executable. Two things make that work, and neither is obvious.
+    **
+    **  First, every HDL section macro expands to a GLOBAL function with a
+    **  fixed name, and hdl.c has its own hard-coded static equivalents of
+    **  all four. Inside hdl.c those statics shadow the modules' globals, so
+    **  hdl_main() called hdl.c's copies and a linked-in module's sections
+    **  were never called at all. Nothing warns: the builtin CKD/FBA types
+    **  register fine, and the only symptom is that attaching a type the
+    **  module provides falls through to dlopen( "hdt<type>.so" ), which on
+    **  Genode stops the component outright.
+    **
+    **  Second, those fixed names mean two modules cannot coexist in one
+    **  binary at all. target.mk therefore renames them per file at compile
+    **  time (-Dhdl_define_devtypes_ep=<module>_hdl_ddev and friends) and the
+    **  port lists the results in hdl_static_modules[].
+    **
+    **  Each module gets its OWN HDLMOD rather than having its sections
+    **  folded into *Hercules, and that is not cosmetic: hdl_next() chains
+    **  from one MODULE to the next, so a panel_command override sharing a
+    **  module with the real panel_command finds no next handler and
+    **  silently swallows every command it does not itself handle. Modules
+    **  are inserted at the head, the LIFO order dlopen'd ones would have had.
+    */
+    {
+        HDLSTATMOD* statmod;
+
+        for (statmod = hdl_static_modules; statmod->name; statmod++)
+        {
+            HDLMOD* mod = malloc( sizeof( HDLMOD ));
+
+            if (!mod)
+                break;
+
+            mod->name      =  strdup( statmod->name );
+            mod->handle    =  NULL;
+            mod->flags     =  HDL_LOAD_NOUNLOAD;
+
+            mod->depsec_ep =  statmod->depsec_ep;
+            mod->regsec_ep =  statmod->regsec_ep;
+            mod->ressec_ep =  statmod->ressec_ep;
+            mod->devsec_ep =  statmod->devsec_ep;
+            mod->inssec_ep =  statmod->inssec_ep;
+            mod->finsec_ep =  statmod->finsec_ep;
+
+            mod->symbols   =  NULL;
+            mod->devices   =  NULL;
+            mod->instructs =  NULL;
+
+            obtain_lock( &hdl_lock );
+            {
+                mod->next   =  hdl_mods;
+                hdl_mods    =  mod;
+                hdl_curmod  =  mod;
+
+                /* Same order hdl_loadmod uses. Sections may be absent. */
+                if (mod->depsec_ep) mod->depsec_ep( &hdl_check_depends_cb    );
+                if (mod->regsec_ep) mod->regsec_ep( &hdl_register_symbols_cb );
+                if (mod->ressec_ep) mod->ressec_ep( &hdl_resolve_symbols_cb  );
+                if (mod->devsec_ep) mod->devsec_ep( &hdl_define_devtypes_cb  );
+            }
+            release_lock( &hdl_lock );
+        }
+
+        /* Re-resolve every module's symbols once they are all registered,
+           exactly as hdl_loadmod does after a load. Registering an override
+           is not enough on its own: dispatch goes through pointers bound by
+           HDL_RESOLVE, and hdl.c's own resolver section has already run and
+           bound panel_command to the real handler. Without this the
+           overrides sit in the symbol table unused and a console reply still
+           reports "Unknown command /". */
+        obtain_lock( &hdl_lock );
+        {
+            HDLMOD*  wrkmod;
+            HDLSYM*  sym;
+
+            for (wrkmod = hdl_mods; wrkmod; wrkmod = wrkmod->next)
+                for (sym = wrkmod->symbols; sym; sym = sym->next)
+                    sym->refcnt = 0;
+
+            for (wrkmod = hdl_mods; wrkmod; wrkmod = wrkmod->next)
+                if (wrkmod->ressec_ep)
+                    wrkmod->ressec_ep( &hdl_resolve_symbols_cb );
+        }
+        release_lock( &hdl_lock );
+    }
+#endif
 
     /* Register our termination routine */
     hdl_addshut( "hdl_term", hdl_term, NULL );
@@ -1323,7 +1417,7 @@ DLL_EXPORT void* hdl_next( const void* symbol )
 /*-------------------------------------------------------------------*/
 
 // HDL_DEPENDENCY_SECTION
-static int hdl_check_depends_ep( DEPCHK* depchk )
+static int hdl_builtin_depends_ep( DEPCHK* depchk )
 {
     int depchk_rc = 0;
 
@@ -1340,7 +1434,7 @@ static int hdl_check_depends_ep( DEPCHK* depchk )
 static void**  UNRESOLVED  = NULL;
 
 // HDL_REGISTER_SECTION
-static void hdl_register_symbols_ep( REGSYM* regsym )
+static void hdl_builtin_regsyms_ep( REGSYM* regsym )
 {
     HDL_REGISTER( panel_display,                 *hdl_real_pandisp   );
     HDL_REGISTER( panel_command,                 *hdl_real_pancmd    );
@@ -1371,7 +1465,7 @@ static void hdl_register_symbols_ep( REGSYM* regsym )
 /*-------------------------------------------------------------------*/
 
 // HDL_RESOLVER_SECTION
-static void hdl_resolve_symbols_ep( GETSYM* getsym )
+static void hdl_builtin_ressyms_ep( GETSYM* getsym )
 {
     HDL_RESOLVE( panel_display                 );
     HDL_RESOLVE( panel_command                 );
@@ -1402,7 +1496,7 @@ static void hdl_resolve_symbols_ep( GETSYM* getsym )
 /*-------------------------------------------------------------------*/
 
 // HDL_DEVICE_SECTION
-static void hdl_define_devtypes_ep( DEFDEV* defdev )
+static void hdl_builtin_devtypes_ep( DEFDEV* defdev )
 {
     HDL_DEVICE (  2305,  *hdl_real_ckd_DEVHND  );
     HDL_DEVICE (  2311,  *hdl_real_ckd_DEVHND  );
