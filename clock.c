@@ -566,15 +566,112 @@ void ARCH_DEP( fetch_int_timer )( REGS* regs )
 /*  host_ETOD - Primary high-resolution clock fetch and conversion   */
 /*-------------------------------------------------------------------*/
 
+#if defined( __GENODE__ )
+/*-------------------------------------------------------------------*/
+/*  Genode: read the host clock locally, not through the libc        */
+/*                                                                   */
+/*  Every STCK reaches here -- etod_clock() -> hw_clock_locked() ->  */
+/*  universal_clock() -> host_ETOD(), with no caching -- so the cost */
+/*  of one read is paid per instruction. Phase 0 measured a peak of  */
+/*  183,644 reads a second with MVS busy.                            */
+/*                                                                   */
+/*  Three sources, measured on this machine on real NOVA:            */
+/*                                                                   */
+/*      curr_time [interpolated]     504.0 ticks    4.0% at peak     */
+/*      CLOCK_MONOTONIC              821.9 ticks    6.6%             */
+/*      curr_time [RPC]            10367.9 ticks   82.6%             */
+/*                                                                   */
+/*  CLOCK_REALTIME, which the code below reads everywhere else, is   */
+/*  not on that list because it has 1 ms resolution on Genode --     */
+/*  measured in four separate environments, so architectural. A 1 ms */
+/*  TOD clock is not a TOD clock.                                    */
+/*                                                                   */
+/*  The first and third rows are the SAME OBJECT in different        */
+/*  states, which is why this asks rather than assumes.              */
+/*  genode_tod_ready() is false until port/genode/genode_tod.cc has  */
+/*  measured a read to be cheap; until then, and for ever after if   */
+/*  it never is, this stays on CLOCK_MONOTONIC and the component     */
+/*  says so in the log.                                              */
+/*                                                                   */
+/*  Asked ONCE, into a static, because changing a TOD clock's source */
+/*  underneath a running guest is how it steps backwards -- and a    */
+/*  TOD clock that steps backwards corrupts the guest's notion of    */
+/*  time in ways that surface much later and somewhere else.         */
+/*  Observed directly, from an earlier version of this patch that    */
+/*  let racing CPU threads each compute the epoch offset: MVS        */
+/*  reached IEA355A and then stopped making progress, CPU threads    */
+/*  still burning cycles, nothing in the log.                        */
+/*                                                                   */
+/*  The offset itself is captured in Libc::Component::construct,     */
+/*  on one thread, before Hercules starts another.                   */
+/*-------------------------------------------------------------------*/
+
+#include "genode_tod.h"
+
+#define NSEC_PER_SEC  INT64_C( 1000000000 )
+#define USEC_PER_SEC  INT64_C( 1000000 )
+
+static int            genode_use_curr_time = 0;   /* decided once, below   */
+static int64_t        genode_tod_offset_ns = 0;   /* REALTIME - MONOTONIC  */
+static pthread_once_t genode_tod_once = PTHREAD_ONCE_INIT;
+
+static void genode_tod_init( void )
+{
+    struct timespec rt, mono;
+
+    genode_use_curr_time = genode_tod_ready();
+
+    if (genode_use_curr_time)
+        return;                 /* the offset is genode_tod_offset_us() */
+
+    clock_gettime( CLOCK_REALTIME,  &rt   );
+    clock_gettime( CLOCK_MONOTONIC, &mono );
+
+    genode_tod_offset_ns =
+          ((int64_t) rt.tv_sec   * NSEC_PER_SEC + rt.tv_nsec)
+        - ((int64_t) mono.tv_sec * NSEC_PER_SEC + mono.tv_nsec);
+}
+
+static INLINE void genode_tod_prime( void )
+{
+    pthread_once( &genode_tod_once, genode_tod_init );
+}
+#endif /* __GENODE__ */
+
 ETOD* host_ETOD( ETOD* ETOD )
 {
     struct timespec time;
 
+#if defined( __GENODE__ )
+
+    int64_t ns;
+
+    genode_tod_prime();
+
+    if (genode_use_curr_time) {
+
+        ns = ((int64_t) genode_tod_us() + genode_tod_offset_us())
+           * (NSEC_PER_SEC / USEC_PER_SEC);
+
+    } else {
+
+        clock_gettime( CLOCK_MONOTONIC, &time );
+
+        ns = (int64_t) time.tv_sec * NSEC_PER_SEC + time.tv_nsec
+           + genode_tod_offset_ns;
+    }
+
+    time.tv_sec  = (time_t) (ns / NSEC_PER_SEC);
+    time.tv_nsec = (long)   (ns % NSEC_PER_SEC);
+
+#else
     /* Should use CLOCK_MONOTONIC + adjustment, but host sleep/hibernate
      * destroys consistent monotonic clock.
      */
 
     clock_gettime( CLOCK_REALTIME, &time );
+#endif
+
     timespec2ETOD( ETOD, &time );
     return ( ETOD );                /* Return address of result      */
 }
