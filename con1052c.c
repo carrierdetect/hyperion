@@ -288,6 +288,27 @@ static void* con1052_panel_command( char *cmd )
             WRMSG( HHC00013, "I", dev->filename, LCSS_DEVNUM, input );
             LOGMSG( "%s\n", input );
 
+            /* THE KEYBOARD BUFFER IS ONE SLOT AND THIS USED TO OVERWRITE IT.
+               dev->keybdrem is the count of bytes the guest has not yet read.
+               Assigning it unconditionally discards a command the guest has
+               not collected, so two /commands issued close together leave
+               only the second -- and an rc script that types six in the same
+               second leaves one. Measured on a 3705 rc: six commands per
+               burst, exactly one IST097I VARY ACCEPTED back, and the NCP
+               "needing 2 to 7 tries" to load was simply which try's VARY
+               happened to be the one still in the buffer when MVS read it.
+               Wait for the guest to drain it first. Bounded so a guest that
+               never reads cannot wedge the command thread; 5 s is far longer
+               than a READ INQUIRY takes to come round. */
+            {
+                int drain = 0;
+                while (dev->keybdrem != 0 && drain++ < 500)
+                    USLEEP( 10000 );
+                if (dev->keybdrem != 0)
+                    LOGMSG( "con1052: previous console input was never read "
+                            "after 5s; overwriting it\n" );
+            }
+
             /* Convert ASCII input to EBCDIC */
             for (i=0; i < dev->bufsize && input[i] != '\0'; i++)
                 dev->buf[i] = isprint( (unsigned char)input[i] ) ?
@@ -310,7 +331,21 @@ static void* con1052_panel_command( char *cmd )
             else
             {
                 RELEASE_DEVLOCK( dev );
-                device_attention( dev, CSW_ATTN );
+
+                /* device_attention() RETURNS 1 AND PRESENTS NOTHING when the
+                   device is busy, has an I/O pending, or already has status
+                   pending -- which the console is every time the guest is
+                   writing a message to it. The return used to be discarded,
+                   so a command typed into a message flood was simply lost,
+                   with the echo already in the log saying it had been
+                   entered. Retry until it is accepted. 1 is busy, 3 is "not
+                   enabled" and is not worth retrying. */
+                {
+                    int rc, attn = 0;
+                    while ((rc = device_attention( dev, CSW_ATTN )) == 1
+                           && attn++ < 500)
+                        USLEEP( 10000 );
+                }
             }
             return NULL;
         }
