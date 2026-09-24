@@ -3229,6 +3229,35 @@ void    GetIfMACAddress( PLCSPORT pLCSPORT )
         pIFaceMAC  = (BYTE*) ifr.ifr_hwaddr.sa_data;
     }
 
+#elif defined( __GENODE__ )
+
+    /* On Genode the interface is a Nic session, and the Nic server -- not
+       Hercules -- assigns its MAC address; the client cannot change it.
+       genode_tuntap.c read the assigned address from the vfs_tap plugin's
+       info file when it opened the device, and hands it over here.
+
+       This branch has the same contract as the SIOCGIFHWADDR one above: on
+       success pIFaceMAC points at the address the interface is really using,
+       and the code below adopts it, warning first if -m asked for a different
+       one. Adopting it is not cosmetic. It is the destination MAC the Nic
+       server puts on inbound frames, so a guest told anything else would
+       discard everything it received. */
+
+    BYTE   genode_mac[ IFHWADDRLEN ];
+    {
+        extern int genode_tap_get_mac( const char* ifname, BYTE* out_mac );
+
+        if (genode_tap_get_mac( pLCSPORT->szNetIfName, genode_mac ) != 0)
+        {
+            // "CTC: ioctl %s failed for device %s: %s; ... ignoring and continuing"
+            WRMSG( HHC00941, "W", "genode_tap_get_mac", pLCSPORT->szNetIfName,
+                   "the interface MAC address could not be read" );
+            return;
+        }
+
+        pIFaceMAC = genode_mac;
+    }
+
 #endif // defined( SIOCGIFHWADDR )
 
     /* Report what MAC address we will really be using */
