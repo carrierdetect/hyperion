@@ -810,8 +810,23 @@ DLL_EXPORT int  socket_deinit ( void ) { return 0; }
 /* (returns 1==true if it's a socket, 0==false otherwise)    */
 DLL_EXPORT int socket_is_socket( int sfd )
 {
+#if defined( __GENODE__ )
+    /* Genode's libc handles sockets through a plugin that implements no
+       fstat, so S_ISSOCK is never true for a socket here. Ask the socket
+       layer directly instead: getsockopt(SO_TYPE) succeeds on a socket and
+       fails with ENOTSOCK on anything else, which is exactly this test.
+    */
+    int       sotype;
+    socklen_t len = sizeof( sotype );
+
+    if (sfd < 0)
+        return 0;
+
+    return ( getsockopt( sfd, SOL_SOCKET, SO_TYPE, &sotype, &len ) == 0 );
+#else
     struct stat st;
     return ( fstat( sfd, &st ) == 0 && S_ISSOCK( st.st_mode ) );
+#endif
 }
 
 /* Set the SO_KEEPALIVE option and timeout values for a
