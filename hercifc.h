@@ -22,7 +22,11 @@ typedef struct _CTLREQ
     union
     {
         struct hifr     hifr;
-#if !defined(__APPLE__) && !defined( FREEBSD_OR_NETBSD ) && !defined(__SOLARIS__)
+/* Genode is excluded for the same reason the BSDs are: there is no
+   struct rtentry. It needs naming separately because hostopts.h gives
+   Genode its own branch ahead of the FreeBSD one, so FREEBSD_OR_NETBSD
+   is not defined for it even though its libc is FreeBSD-derived. */
+#if !defined(__APPLE__) && !defined( FREEBSD_OR_NETBSD ) && !defined(__SOLARIS__) && !defined(__GENODE__)
         struct rtentry  rtentry;
 #endif
     }
