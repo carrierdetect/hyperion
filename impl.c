@@ -1797,6 +1797,28 @@ int     rc, maxprio, minprio;
         {
             /* No-User-Interface mode without any external GUI... */
 
+#if defined( __GENODE__ )
+            /* A Genode component has a stdin only if its <libc> config names
+               one. Where a service processor pairs a Terminal session to this
+               partition, that stdin IS the control channel and the loop below
+               is exactly right: fgets() blocks, wakes on each command, and
+               never sees EOF, because the terminal VFS plugin has no way to
+               produce one.
+
+               Where there is no management plane at all -- the development
+               scenarios -- fd 0 is not open, fgets() fails at once, the loop
+               ends, and the stock code below falls through to quit_cmd():
+               Hercules shuts down cleanly having done nothing, an exit(0)
+               that looks exactly like success from outside. So ask whether
+               there is a stdin before reading it, and otherwise just stay up
+               until something asks for shutdown. */
+            if (fcntl( STDIN_FILENO, F_GETFD ) < 0)
+            {
+                while (!sysblk.shutdown)
+                    SLEEP( 1 );
+            }
+            else
+#endif
             process_script_file( "-", true );
 
             /* We come here only if the user did ctl-d on a tty,
