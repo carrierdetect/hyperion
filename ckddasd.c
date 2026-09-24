@@ -709,6 +709,15 @@ void ckd_dasd_query_device (DEVBLK *dev, char **devclass,
 
     BEGIN_DEVICE_CLASS_QUERY( "DASD", dev, devclass, buflen, buffer );
 
+    /* ckdcu IS CHECKED BELOW FOR THE SAME REASON cckd_ext IS. A DEVBLK is
+       linked into sysblk.firstdev with allocated=1 BEFORE attach_device runs
+       the handler's init, and ckdcu is only set inside
+       ckd_dasd_init_handler. Any chain walk that gates on allocated alone --
+       devlist_cmd does exactly that -- can therefore reach this function
+       while ckdcu is still NULL and take a null dereference. Observed on
+       2026-09-22 from a device-status observer thread. Upstream issue filed;
+       the real fix is for the walker to hold sysblk.config, but the
+       dereference should not be unguarded either. */
     cckd = dev->cckd_ext;
 
     if (!cckd)
@@ -720,7 +729,7 @@ void ckd_dasd_query_device (DEVBLK *dev, char **devclass,
                       filename,
                       dev->ckdrdonly ? "ro " : "",
                       dev->ckdfakewr ? "fw " : "",
-                      dev->ckdcu->name,
+                      dev->ckdcu ? dev->ckdcu->name : "?",
                       dev->ckdcyls,
                       dev->ckdnumfd,
                       dev->excps );
@@ -732,7 +741,7 @@ void ckd_dasd_query_device (DEVBLK *dev, char **devclass,
                       filename,
                       dev->ckdrdonly ? "ro " : "",
                       dev->ckdfakewr ? "fw " : "",
-                      dev->ckdcu->name,
+                      dev->ckdcu ? dev->ckdcu->name : "?",
                       dev->ckdcyls,
                       dev->excps );
         }
@@ -744,7 +753,7 @@ void ckd_dasd_query_device (DEVBLK *dev, char **devclass,
                   filename,
                   dev->ckdrdonly ? "ro " : "",
                   dev->ckdfakewr ? "fw " : "",
-                  dev->ckdcu->name,
+                  dev->ckdcu ? dev->ckdcu->name : "?",
                   dev->ckdcyls,
                   cckd->sfn,
                   dev->excps );
