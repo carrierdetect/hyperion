@@ -117,6 +117,9 @@ static PARSER ptab[] = {
     {"bufsize", "%s"},
     {"listen", "%s"},
     {"connect", "%s"},
+#if defined( __GENODE__ )
+    {"lpar", "%s"},
+#endif
     {NULL, NULL}
 };
 
@@ -137,6 +140,9 @@ enum {
     TCPNJE_KW_BUFSIZE,
     TCPNJE_KW_LISTEN,
     TCPNJE_KW_CONNECT
+#if defined( __GENODE__ )
+    ,TCPNJE_KW_LPAR
+#endif
 } tcpnje_kw;
 
 static void logdump(char *txt, DEVBLK *dev, BYTE *bfr, size_t sz)
@@ -711,10 +717,64 @@ static void tcpnje_wakeup(struct TCPNJE *tn, BYTE code)
 /* either because link partner has gone away or a serious error has  */
 /* occurred attempting to contact it.                                */
 /*-------------------------------------------------------------------*/
+#if defined( __GENODE__ )
+/*-------------------------------------------------------------------*/
+/* tcpnje_xlink_reset -- put the link back to CLOSED, keep the cable  */
+/*-------------------------------------------------------------------*/
+/* A crosslink is a cable, not a connection: both ends exist for as   */
+/* long as the machine does and there is nothing to re-establish.     */
+/* Closing it is not recovery, it is damage -- the far end is left    */
+/* holding a session its peer abandoned, and reopening gives a SECOND */
+/* session beside the first.                                          */
+/*                                                                    */
+/* So a reset resets PROTOCOL state and leaves the descriptor alone.  */
+/* The cable is closed once, at TCPNJE_PEND_SHUTDOWN.                 */
+static void tcpnje_xlink_reset(struct TCPNJE *tn)
+{
+    if (tn->state > NJEACKRCD) tn->signoff = 1;
+
+    tn->afd   = -1;
+    tn->pfd   = -1;
+    tn->sfd   = -1;
+    tn->state = CLOSED;
+}
+
+
+/* Read and discard whatever the last incarnation left in the cable.  */
+/* A fresh TCP connection has no history; a cable does -- the far end */
+/* may have been bidding for minutes while this end was down, and     */
+/* those bids must not be read as the start of this session.          */
+static void tcpnje_xlink_drain(struct TCPNJE *tn)
+{
+    BYTE scratch[512];
+    int  n, total = 0;
+
+    if (tn->xlinkfd < 0) return;
+
+    /* Reads until EAGAIN, which on a non-blocking descriptor is how an empty
+       cable answers. */
+    while ((n = read(tn->xlinkfd, scratch, sizeof(scratch))) > 0)
+    {
+        total += n;
+        if (total > 1048576) break;   /* a stuck peer, not a backlog */
+    }
+
+    if (total)
+        DBGMSG(128, "HHCTN054I %4.4X:TCPNJE - drained %d stale bytes from the cable\n",
+                tn->dev->devnum, total);
+}
+#endif /* __GENODE__ */
+
+
 static void tcpnje_close(int fd, struct TCPNJE *tn)
 {
     if (fd >= 0)
     {
+#if defined( __GENODE__ )
+        /* Skip only the close: the bookkeeping below still has to run, or
+           the machine is left thinking it is connected over garbage. */
+        if (!(tn->xlink && (fd == tn->xlinkfd)))
+#endif
         close_socket(fd);
 
         if (fd == tn->pfd)
@@ -783,6 +843,15 @@ static int tcpnje_read(int fd, struct TNBUFFER *buffer, size_t wanted, struct TC
     count = buffer->inptr.address - buffer->base.address;
     if (count >= (ssize_t) wanted) return 1;
 
+#if defined( __GENODE__ )
+    /* recv() does not exist on a VFS descriptor. With flags of 0 it is
+       read(). Note what is NOT here: no shim for read()==0 meaning "empty".
+       Genode's libc either fetches directly or blocks, so 0 is not the empty
+       indication it is on a socket, and treating it as one was dead code. */
+    if (tn->xlink)
+        done = read(fd, buffer->inptr.address, wanted - count);
+    else
+#endif
     done = recv(fd, buffer->inptr.address, wanted - count, 0);
 
     if (done > 0)
@@ -846,6 +915,23 @@ static int tcpnje_write(int fd, struct TNBUFFER *buffer, struct TCPNJE *tn)
 
     while(part > 0)
     {
+#if defined( __GENODE__ )
+        if (tn->xlink)
+        {
+            done = write(fd, buffer->outptr.address, part);
+
+            /* 0 means the peer's ring is full, not that nothing happened.
+               The loop this sits in would spin on it forever, holding
+               tn->lock, with the CCW executor stuck behind it. Hand it to
+               the write-contention path instead. */
+            if (done == 0)
+            {
+                errno = EAGAIN;
+                done  = -1;
+            }
+        }
+        else
+#endif
         done = send(fd, buffer->outptr.address, part, 0);
 
         if (done < 0) break;
@@ -1460,6 +1546,52 @@ static void *tcpnje_thread(void *vtn)
             guest_to_host_string(lnodestring, sizeof(lnodestring), tn->lnode),
             guest_to_host_string(rnodestring, sizeof(rnodestring), tn->rnode));
 
+#if defined( __GENODE__ )
+    /* OPEN THE CABLE, AND TOUCH NOTHING ELSE.
+    
+       Not because a write would otherwise be lost -- the crosslink buffers
+       before its partner attaches -- but so that a missing or misrouted
+       /dev/nje_<peer> fails the device here, at initialisation, instead of
+       at the first bid minutes later.
+    
+       state stays CLOSED. That matters: NJE38 issues a DISABLE as part of
+       starting its line, and on TCP that is harmless precisely because
+       nothing is connected yet. Pre-arming the transport before the guest
+       initialises its line turns a routine DISABLE into a teardown of a
+       working link -- and it reaches close_socket() directly, not through
+       tcpnje_close(). */
+    if (tn->xlink)
+    {
+        char path[32];
+
+        MSGBUF(path, "/dev/nje_%s", tn->xlinkpeer);
+
+        /* O_NONBLOCK is not optional. Genode's libc never returns 0 for an
+           empty read -- it blocks -- so a blocking descriptor turns the drain
+           below into a permanent stall, with tn->lock held and the guest's
+           channel program waiting behind it. The whole driver goes silent and
+           NJE38 hangs on its first write to the line. */
+        tn->xlinkfd = open(path, O_RDWR | O_NONBLOCK);
+
+        if (tn->xlinkfd < 0)
+        {
+            logmsg("HHCTN022E TCPNJE - cannot open %s: %s\n", path, strerror(errno));
+            tn->curpending = TCPNJE_PEND_CLOSED;
+            signal_condition(&tn->ipc);
+            return NULL;
+        }
+
+        /* Which end bids. The node names are mirrored between the two ends,
+           so this is true on exactly one of them whatever names an operator
+           chose, and needs no new operand. Equality is rejected at parse
+           time -- two ends that both answer would wait for each other. */
+        tn->xlinkactive = (memcmp(tn->lnode, tn->rnode, sizeof(tn->lnode)) < 0) ? 1 : 0;
+
+        DBGMSG(128, "HHCTN054I %4.4X:TCPNJE - cable %s open, this end %s\n",
+                devnum, path, tn->xlinkactive ? "bids" : "answers");
+    }
+#endif
+
     if (!init_signaled)
     {
         tn->curpending = TCPNJE_PEND_IDLE;
@@ -1494,6 +1626,14 @@ static void *tcpnje_thread(void *vtn)
         switch(tn->curpending)
         {
             case TCPNJE_PEND_SHUTDOWN:
+#if defined( __GENODE__ )
+                /* The one place the cable is closed. */
+                if (tn->xlink && (tn->xlinkfd >= 0))
+                {
+                    close_socket(tn->xlinkfd);
+                    tn->xlinkfd = -1;
+                }
+#endif
                 tn_shutdown = 1;
                 break;
             case TCPNJE_PEND_IDLE:
@@ -1604,6 +1744,47 @@ static void *tcpnje_thread(void *vtn)
                     /* Estimate buffer size to use until RSCS negotiates it */
                     tn->tpbufsize = tn->tcpoutbuf.size/2;
                 }
+#if defined( __GENODE__ )
+                /* ON A CABLE THERE IS NOTHING TO CONNECT.
+                
+                   The TCPNJE OPEN/ACK handshake validates that a connection
+                   came from the expected peer, routes it to the right device
+                   among several sharing a listening port, exchanges host
+                   addresses, and resolves the race between two ends that both
+                   dialled. Point to point between two partitions there is one
+                   peer, one device per end, no port, no addresses worth
+                   exchanging, and the node-name comparison above has already
+                   settled who bids. Every one of its jobs is void.
+                
+                   And nothing downstream depends on having TRANSITED it --
+                   only on its results, which are set directly here. The
+                   states TCPLISTEN..NJEOPNSNT simply never occur on a cable.
+                
+                   The reset block above has just run, which is what gives
+                   this end its buffer pointers; skipping it was what wrote
+                   through a NULL outptr and killed a partition.
+                
+                   Drain first: unlike a fresh connection, the cable still
+                   holds whatever the last incarnation left -- the far end may
+                   have been bidding for minutes while this end was down. */
+                if (tn->xlink)
+                {
+                    tcpnje_xlink_drain(tn);
+
+                    tn->sfd   = tn->xlinkfd;
+                    tn->state = tn->xlinkactive ? NJEACKRCD : NJEACKSNT;
+
+                    /* Prepare to receive the first TTB */
+                    tn->tcpinbuf.inptr.address = tn->tcpinbuf.base.address;
+
+                    DBGMSG(128, "HHCTN054I %4.4X:TCPNJE - link up over the cable, %s\n",
+                            devnum, tn->xlinkactive ? "bidding" : "answering");
+
+                    tn->curpending = TCPNJE_PEND_IDLE;
+                    signal_condition(&tn->ipc);
+                    break;
+                }
+#endif
                 /* Are we supposed to be listening for incoming connections? */
                 /* if this is a DIAL=OUT only line, no listen is necessary */
                 if (tn->dolisten && (tn->listening != 2))
@@ -1726,6 +1907,24 @@ static void *tcpnje_thread(void *vtn)
 
                 /* The CCW Executor says : DISABLE */
             case TCPNJE_PEND_DISABLE:
+#if defined( __GENODE__ )
+                /* THIS is what a guest DISABLE did to a pre-armed cable: it
+                   went straight to close_socket() below, never through
+                   tcpnje_close(), and left the far end holding a session its
+                   peer had abandoned. NJE38 issues one as part of starting
+                   its line, so it is routine, not error recovery -- and the
+                   cable must survive it. Reset the protocol, keep the wire. */
+                if (tn->xlink)
+                {
+                    DBGMSG(128, "HHCTN057I %4.4X:TCPNJE - DISABLE: link down, cable kept\n",
+                            devnum);
+                    tn->listening = 0;
+                    tcpnje_xlink_reset(tn);
+                    tn->curpending = TCPNJE_PEND_IDLE;
+                    signal_condition(&tn->ipc);
+                    break;
+                }
+#endif
                 if (tn->listening > 1)
                 {
                     DBGMSG(128, "HHCTN056I %4.4X:TCPNJE - closing listening socket due to DISABLE\n",
@@ -1799,8 +1998,31 @@ static void *tcpnje_thread(void *vtn)
         /* If we are waiting for a write contention to clear, tell select() to watch for it. */
         if (writecont && tn->sfd >= 0)
         {
-            FD_SET(tn->sfd, &wfd);
-            maxfd = maxfd < tn->sfd ? tn->sfd : maxfd;
+#if defined( __GENODE__ )
+            /* NEVER SELECT A CROSSLINK FOR WRITABILITY.
+            
+               write_ready() is unconditionally true for the VFS terminal
+               plugin, so select() returns immediately every time and the
+               retry becomes a spin: 106 attempts at one 67-byte block inside
+               a single second on the run that found this. It got the data out
+               and burned a core doing it.
+            
+               A full ring drains because the PEER reads, not because this end
+               becomes writable, so the honest thing is to wait a little and
+               try again. 20 ms is far below the guest's own timers and far
+               above a spin. */
+            if (tn->xlink)
+            {
+                tv.tv_sec  = 0;
+                tv.tv_usec = 20000;
+                seltv = &tv;
+            }
+            else
+#endif
+            {
+                FD_SET(tn->sfd, &wfd);
+                maxfd = maxfd < tn->sfd ? tn->sfd : maxfd;
+            }
         }
 
         /* The the MAX File Desc for Arg 1 of SELECT */
@@ -2416,6 +2638,9 @@ static int tcpnje_init_handler(DEVBLK *dev, int argc, char *argv[])
          * Initialise ports & hosts
         */
         tn->pfd = -1;
+#if defined( __GENODE__ )
+        tn->xlinkfd = -1;
+#endif
         tn->afd = -1;
         tn->sfd = -1;
         tn->lport = TCPNJE_DEFAULT_PORT;
@@ -2627,6 +2852,38 @@ static int tcpnje_init_handler(DEVBLK *dev, int argc, char *argv[])
                 case TCPNJE_KW_CONNECT:
                     tn->connect = atoi(res.text);
                     break;
+#if defined( __GENODE__ )
+                case TCPNJE_KW_LPAR:
+                    /* NJE BETWEEN PARTITIONS OF ONE MACHINE IS IPC.
+                    
+                         0090 tcpnje 2703 lnode=MVSA rnode=MVSB lpar=b
+                    
+                       The operand is the peer partition, because that is what
+                       an operator and a generator both know; the path is a
+                       convention, /dev/nje_<peer>, and the scenario names the
+                       VFS node to match. lport=, rport= and rhost= are
+                       untouched and remain the way to reach a node on another
+                       host, which is what NJE is for. */
+                    {
+                        size_t n = strlen(res.text), k;
+                        int    ok = (n >= 1) && (n < sizeof(tn->xlinkpeer));
+
+                        for (k = 0; ok && (k < n); k++)
+                            if (!isalnum((unsigned char)res.text[k])) ok = 0;
+
+                        if (!ok)
+                        {
+                            DBGMSG(2, "HHCTN011E %4.4X:TCPNJE - lpar= wants a partition name, got %s\n",
+                                    dev->devnum, res.text);
+                            errcnt++;
+                            break;
+                        }
+                        strlcpy(tn->xlinkpeer, res.text, sizeof(tn->xlinkpeer));
+                        tn->xlink   = 1;
+                        tn->xlinkfd = -1;
+                    }
+                    break;
+#endif
                 default:
                     break;
             }
@@ -2748,6 +3005,19 @@ static int tcpnje_init_handler(DEVBLK *dev, int argc, char *argv[])
             msg074e(tn, "LNODE");
             errcnt++;
         }
+#if defined( __GENODE__ )
+        /* The bid/answer split is decided by comparing the node names, so
+           identical ones leave both ends answering and nothing ever starts.
+           On TCP this configuration merely produces a confusing link; here it
+           is a deadlock, so refuse it. */
+        if (tn->xlink && (memcmp(tn->lnode, tn->rnode, sizeof(tn->lnode)) == 0))
+        {
+            DBGMSG(2, "HHCTN011E %4.4X:TCPNJE - lpar= needs lnode and rnode to differ\n",
+                    dev->devnum);
+            errcnt++;
+        }
+#endif
+
         if (errcnt > 0)
         {
             DBGMSG(2, "HHCTN021I %4.4X:TCPNJE - initialisation failed due to previous errors\n",

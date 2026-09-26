@@ -158,6 +158,12 @@ struct TCPNJE
     BYTE   curpending;          /* Current pending operation                */
     BYTE   fastopen;            /* FASTOPEN flag specified for this stream  */
     BYTE   listening;           /* Listening attempted or in progress       */
+#if defined( __GENODE__ )
+    BYTE   xlink;               /* Link is a terminal_crosslink, not TCP    */
+    BYTE   xlinkactive;         /* This end bids; the other answers         */
+    int    xlinkfd;             /* The cable. Opened once, closed at exit.  */
+    char   xlinkpeer[9];        /* Peer partition named by lpar=            */
+#endif
     u_int  enabled:1;           /* An ENABLE CCW has been sucesfully issued */
     u_int  eibmode:1;           /* EIB Setmode issued                       */
     u_int  dialin:1;            /* This is a SWITCHED DIALIN line           */
