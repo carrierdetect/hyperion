@@ -1019,6 +1019,98 @@ static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
 
     SetSIDInfo( dev, 0x3088, 0x08, 0x3088, 0x01 );
 
+#if defined( __GENODE__ )
+    // A CTC BETWEEN TWO PARTITIONS OF THE SAME MACHINE IS NOT A NETWORK.
+    //
+    //   0600 CTCT lpar=b [mtu]
+    //
+    // CTCT carries a point-to-point channel cable over TCP because that is
+    // the only transport two Hercules processes on different hosts share.
+    // Two partitions of ONE machine have a better one: terminal_crosslink,
+    // which is exactly two clients and a buffer each way, and which this port
+    // already uses for the 3705's channel adapters and lines.
+    //
+    // The operand is the PEER PARTITION, not a device path, because that is
+    // the only thing an operator or a generator actually knows: "a CTC to
+    // partition b". The path is a convention -- /dev/ctc_<peer> -- and the
+    // scenario names the VFS node to match. Each side names the OTHER, so a
+    // reads /dev/ctc_b and b reads /dev/ctc_a, and both are routed to the one
+    // crosslink between them.
+    //
+    // Over IPC there is nothing to connect to and nothing to listen for, so
+    // this branch replaces the whole socket(), bind(), connect(), listen(),
+    // CTCT_ListenThread() dance with one open(). Everything after Init is
+    // untouched: read_socket() and write_socket() are read() and write() on
+    // every non-Windows host (hsocket.c), so the data path already works on a
+    // VFS file descriptor. That is the opposite of the BSC line's send(),
+    // which had to be converted -- worth stating because the two look alike.
+    //
+    // THE TCP FORM IS UNCHANGED AND STILL THE DEFAULT. A CTC to a Hercules on
+    // another host has no crosslink to share and must stay on TCP; this is a
+    // third form beside it, not a replacement.
+    if (argc >= 1 && strncasecmp( argv[0], "lpar=", 5 ) == 0)
+    {
+        const char *peer = argv[0] + 5;
+        char        path[32];
+        int         ipcmtu = 65536;   // same default the lpar scenario uses
+        size_t      n;
+
+        // A partition name, not a path. Keep it to what a partition can be
+        // called so the constructed path cannot be steered somewhere else.
+        n = strlen( peer );
+        if (n < 1 || n > 8)
+        {
+            WRMSG( HHC00916, "E", SSID_TO_LCSS(dev->ssid), dev->devnum,
+                   "CTC", "peer partition", peer );
+            return -1;
+        }
+        for (size_t k = 0; k < n; k++)
+        {
+            if (!isalnum( (unsigned char)peer[k] ))
+            {
+                WRMSG( HHC00916, "E", SSID_TO_LCSS(dev->ssid), dev->devnum,
+                       "CTC", "peer partition", peer );
+                return -1;
+            }
+        }
+
+        if (argc >= 2)
+        {
+            if (strlen( argv[1] ) > 5 ||
+                sscanf( argv[1], "%u%c", &ipcmtu, &c ) != 1 ||
+                ipcmtu < 46 || ipcmtu > 65536)
+            {
+                WRMSG( HHC00916, "E", SSID_TO_LCSS(dev->ssid), dev->devnum,
+                       "CTC", "MTU size", argv[1] );
+                return -1;
+            }
+        }
+
+        dev->bufsize = ipcmtu;
+
+        MSGBUF( path, "/dev/ctc_%s", peer );
+
+        // O_RDWR because a crosslink is one bidirectional stream. No
+        // O_NONBLOCK: CTCT_Read does its own select() with a timeout before
+        // every read, and a Terminal's read() does not block once select has
+        // said there is something there.
+        dev->fd = open( path, O_RDWR );
+
+        if (dev->fd < 0)
+        {
+            WRMSG( HHC00900, "E", SSID_TO_LCSS(dev->ssid), dev->devnum,
+                   "CTC", "open()", strerror( errno ) );
+            return -1;
+        }
+
+        MSGBUF( dev->filename, "%s", path );
+        dev->filename[sizeof(dev->filename)-1] = '\0';
+
+        WRMSG( HHC00972, "I", SSID_TO_LCSS(dev->ssid), dev->devnum, path, "ipc" );
+        return 0;
+    }
+#endif /* __GENODE__ */
+
     // Check for correct number of arguments
     if (argc != 4)
     {
