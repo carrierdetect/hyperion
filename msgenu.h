@@ -1087,7 +1087,13 @@ LOGM_DLL_IMPORT int  panel_command_capture( char* cmd, char** resp, bool quiet )
 //efine HHC01357 (available)
 //efine HHC01358 (available)
 //efine HHC01359 (available)
-//efine HHC01360 - HHC01389 (available)
+#define HHC01361 "%1d:%04X CHAN: resume subchannel refused: cc=%d flag2=%2.2X flag3=%2.2X orb4=%2.2X"
+#define HHC01362 "%1d:%04X CHAN: PCI status presented while suspended: pci3=%2.2X scsw3=%2.2X"
+#define HHC01363 "%1d:%04X CHAN: resume discards pending status: flag2=%2.2X flag3=%2.2X"
+#define HHC01364 "%1d:%04X CHAN: halt signalling skipped, status already pending: flag3=%2.2X"
+#define HHC01365 "%1d:%04X CHAN: suspending with no function control: flag2=%2.2X flag3=%2.2X"
+#define HHC01366 "%1d:%04X CHAN: unconditional fc clear on suspended subchannel: flag1=%2.2X flag2=%2.2X flag3=%2.2X"
+//efine HHC01367 - HHC01389 (available)
 #define HHC01390 "%s" // DUMP               (debugging)
 #define HHC01391 "%s" // DUMP_STORAGE       (debugging)
 #define HHC01392 "%s" // DISPLAY_PREFETCH   (debugging)

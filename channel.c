@@ -1745,6 +1745,12 @@ test_subchan_clear(DEVBLK* dev, SCSW* scsw)
                 dev->suspended = 0;
             }
 
+            if (scsw == &dev->scsw               &&
+                (scsw->flag2 & SCSW2_FC_START)   &&
+                (scsw->flag3 & SCSW3_AC_SUSP))
+                WRMSG( HHC01366, "W", LCSS_DEVNUM,
+                       scsw->flag1, scsw->flag2, scsw->flag3 );
+
             scsw_clear_fc_C(scsw);
             scsw_clear_ac_Cp(scsw);
             scsw_clear_sc_Cs(scsw);
@@ -1804,6 +1810,20 @@ test_subchan_locked (REGS* regs, DEVBLK* dev,
         status = pci;
         *ioint = &dev->pciioint;
         *scsw  = &dev->pciscsw;
+
+        /* raise_pci() snapshots activity control as subchannel-active
+           plus device-active and never revises it, so a PCI SCSW stored
+           after the subchannel suspended tells the guest the opposite of
+           the truth -- and Linux's ccw_device_resume() refuses a resume
+           on exactly that word. If this precedes every rc=-22, that is
+           the trigger. */
+        {
+            static int pcisusp_logged = 0;
+            if ((dev->scsw.flag3 & SCSW3_AC_SUSP) &&
+                pcisusp_logged++ < 32)
+                WRMSG( HHC01362, "W", LCSS_DEVNUM,
+                       dev->pciscsw.flag3, dev->scsw.flag3 );
+        }
     }
     else if (likely( (dev->scsw.flag3     & SCSW3_SC_PEND)  ||
                     !(dev->attnscsw.flag3 & SCSW3_SC_PEND)))
@@ -2139,6 +2159,17 @@ perform_halt_and_release_lock (DEVBLK *dev)
     /* If status incomplete,
      * [15.4.2] Perform halt function signaling
      */
+    /* When a primary or secondary status is already pending, the whole
+       halt-signalling block below is skipped -- FC_HALT is never set, so
+       the guest is never told the halt completed. */
+    if (dev->scsw.flag3 & (SCSW3_SC_PRI | SCSW3_SC_SEC) &&
+        dev->scsw.flag3 & SCSW3_SC_PEND)
+    {
+        static int haltskip_logged = 0;
+        if (haltskip_logged++ < 32)
+            WRMSG( HHC01364, "W", LCSS_DEVNUM, dev->scsw.flag3 );
+    }
+
     if (!(dev->scsw.flag3 & (SCSW3_SC_PRI | SCSW3_SC_SEC) &&
           dev->scsw.flag3 & SCSW3_SC_PEND))
     {
@@ -3099,6 +3130,13 @@ int cc;                                 /* Return code               */
             dev->scsw.flag2 |= SCSW2_AC_RESUM;
             cc = schedule_ioq(NULL, dev);
         }
+
+        /* A refused RESUME SUBCHANNEL is an anomaly worth logging always,
+           not only under a CCW trace. cc=2 has several OR'd conditions;
+           logging the words that decide it names which one fired. */
+        if (cc != 0)
+            WRMSG( HHC01361, "W", LCSS_DEVNUM, cc,
+                   dev->scsw.flag2, dev->scsw.flag3, dev->orb.flag4 );
 
         /* If tracing, write trace message */
         if (dev->ccwtrace)
@@ -4671,6 +4709,20 @@ IOBUF iobuf_initial;                    /* Channel I/O buffer        */
             }
         }
 
+        /* This clears SC_PEND unconditionally. If a halt was signalled
+           just before the device thread got here, perform_halt has
+           already set FC_HALT, cleared AC_HALT, set SC_PEND and queued
+           the interrupt -- and clearing SC_PEND here makes that halt
+           status evaporate, while AC_HALT being off means the chain
+           resumes instead of halting. The guest then never sees
+           FCTL_HALT_FUNC and its wait for HALTED never ends. */
+        {
+            static int discard_logged = 0;
+            if ((dev->scsw.flag3 & SCSW3_SC_PEND) && discard_logged++ < 32)
+                WRMSG( HHC01363, "W", LCSS_DEVNUM,
+                       dev->scsw.flag2, dev->scsw.flag3 );
+        }
+
         /* Reset the suspended status in the SCSW */
         dev->scsw.flag2 &= ~SCSW2_AC_RESUM;
         dev->scsw.flag3 &= ~(SCSW3_AC_SUSP  |
@@ -5198,6 +5250,14 @@ execute_halt:
                         dev->scsw.flag3 &= ~(SCSW3_AC_SCHAC |
                                              SCSW3_AC_DEVAC);
                         dev->scsw.flag3 |= SCSW3_AC_SUSP;
+
+                        /* A suspended subchannel is part-way through a
+                           start function, so function control must read
+                           start. If it is zero here, every later RESUME
+                           SUBCHANNEL is refused cc=2 for good. */
+                        if (!(dev->scsw.flag2 & SCSW2_FC))
+                            WRMSG( HHC01365, "W", LCSS_DEVNUM,
+                                   dev->scsw.flag2, dev->scsw.flag3 );
                         /* Principles violation. Some operating systems use
                          * CLI to check for suspend, intermediate and pending
                          * status (x'29') instead of the Principles statement
