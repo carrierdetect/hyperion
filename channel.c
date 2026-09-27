@@ -5152,6 +5152,27 @@ execute_halt:
                 goto execute_clear;
             }
 
+            /* A channel program with nothing in control of the subchannel has
+               been cancelled, and whoever cancelled it has already reported
+               completion to the guest. Recording a suspension now would leave
+               the subchannel suspended with an empty function-control field,
+               which RESUME SUBCHANNEL must refuse with cc=2 -- and does so for
+               good, since only a fresh START SUBCHANNEL sets the field again.
+
+               The test above cannot catch the CLEAR SUBCHANNEL case, because
+               perform_clear_subchan() clears the whole of SCSW2_AC (0x0F) and
+               so removes SCSW2_AC_CLEAR itself; nor would testing
+               SCSW2_FC_CLEAR help, because test_subchan_clear() clears the
+               whole function-control field when the guest reads the clear
+               status. What is reliably true of a cancelled program here is
+               that nothing is in control, so that is what this asks.
+
+               End the chain without touching the subchannel status word.
+               Re-running the clear would present a second interrupt for a
+               clear the guest has already seen. */
+            if (!(dev->scsw.flag2 & SCSW2_FC))
+                return execute_ccw_chain_fast_return( iobuf, &iobuf_initial, NULL );
+
             /* Call the i/o suspend exit */
             if (dev->hnd->suspend)
                (dev->hnd->suspend)( dev );
