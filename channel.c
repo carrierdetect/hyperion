@@ -5171,7 +5171,24 @@ execute_halt:
                Re-running the clear would present a second interrupt for a
                clear the guest has already seen. */
             if (!(dev->scsw.flag2 & SCSW2_FC))
+            {
+                /* Clear the busy indication before leaving. set_subchannel_busy()
+                   marked the device busy when this chain was started, and every
+                   other way out of this function clears it again -- the
+                   suspension below does it directly, and the halt and clear
+                   paths do it through perform_halt_and_release_lock() and
+                   perform_clear_subchan(). Returning without doing so leaves
+                   dev->busy set on a device whose thread has gone, and nothing
+                   afterwards clears it: MODIFY SUBCHANNEL then answers condition
+                   code 2 for good, and a guest told "busy" has no recovery. */
+                OBTAIN_DEVLOCK( dev );
+                {
+                    clear_subchannel_busy( dev );
+                }
+                RELEASE_DEVLOCK( dev );
+
                 return execute_ccw_chain_fast_return( iobuf, &iobuf_initial, NULL );
+            }
 
             /* Call the i/o suspend exit */
             if (dev->hnd->suspend)
