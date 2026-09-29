@@ -4671,12 +4671,39 @@ IOBUF iobuf_initial;                    /* Channel I/O buffer        */
             }
         }
 
-        /* Reset the suspended status in the SCSW */
-        dev->scsw.flag2 &= ~SCSW2_AC_RESUM;
-        dev->scsw.flag3 &= ~(SCSW3_AC_SUSP  |
-                             SCSW3_SC_ALERT |
-                             SCSW3_SC_INTER |
-                             SCSW3_SC_PEND);
+        /* Reset the suspended status in the SCSW.
+         *
+         * Keep SCSW3_SC_PEND if a halt function is in control. HALT SUBCHANNEL
+         * against a suspended subchannel signals it to resume and then, in
+         * perform_halt_and_release_lock(), clears SCSW2_AC_HALT and queues the
+         * halt's completion with SCSW3_SC_PEND set. Discarding that bit here
+         * throws away a status the guest has not read, and since AC_HALT is
+         * already gone the resumed chain does not halt either -- so a guest
+         * waiting for the halt to complete waits for ever. Linux's lcs driver
+         * does exactly that, in lcs_stop_channel(), and the write to take the
+         * device offline never returns:
+         *
+         *     INFO: task netinit:1 blocked for more than 120 seconds.
+         *
+         * Whether it happens is a race between this thread and the guest's
+         * TEST SUBCHANNEL, which is why adding any work between the halt being
+         * queued and the guest reading it makes the symptom disappear.
+         *
+         * Only this case needs the exception. A halt that has been signalled
+         * but not yet performed still has AC_HALT set, and the "early clear or
+         * halt" test just above this block sends it to execute_halt before the
+         * resume is ever considered -- so AC_HALT is always clear here and the
+         * two cases cannot be confused.
+         */
+        {
+            int keep_pend = (dev->scsw.flag2 & SCSW2_FC_HALT) ? 1 : 0;
+
+            dev->scsw.flag2 &= ~SCSW2_AC_RESUM;
+            dev->scsw.flag3 &= ~(SCSW3_AC_SUSP  |
+                                 SCSW3_SC_ALERT |
+                                 SCSW3_SC_INTER |
+                                 (keep_pend ? 0 : SCSW3_SC_PEND));
+        }
         dev->scsw.flag3 |= (SCSW3_AC_SCHAC | SCSW3_AC_DEVAC);
 
         /* Call the i/o resume exit if not clearing */
