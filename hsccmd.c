@@ -56,6 +56,7 @@ DISABLE_GCC_UNUSED_FUNCTION_WARNING;
 #define _HENGINE_DLL_
 
 #include "hercules.h"
+#include "cdlring.h"
 #include "devtype.h"
 #include "opcode.h"
 #include "history.h"
@@ -6038,6 +6039,42 @@ static BYTE is_devclass_name( const char* name )
 /*-------------------------------------------------------------------*/
 /* devlist command - list devices                                    */
 /*-------------------------------------------------------------------*/
+/*-------------------------------------------------------------------*/
+/* cdlring - dump the channel trace ring                             */
+/*-------------------------------------------------------------------*/
+int cdlring_cmd( int argc, char* argv[], char* cmdline )
+{
+    UNREFERENCED( cmdline );
+
+#ifndef CDLRING
+    UNREFERENCED( argc );
+    UNREFERENCED( argv );
+    // "CDLRING %s"
+    WRMSG( HHC01374, "I", "not built in; rebuild with CDLRING=1" );
+    return 0;
+#else
+    int n = 512;
+
+    if (argc > 1 && CMD( argv[1], all, 3 ))
+        n = 0;
+    else
+    if (argc > 3 && CMD( argv[1], dev, 3 ))
+    {
+        cdlring_watch( (U16) strtoul( argv[2], NULL, 16 ), 0 );
+        cdlring_watch( (U16) strtoul( argv[3], NULL, 16 ), 1 );
+        // "CDLRING %s"
+        WRMSG( HHC01374, "I", "watch list replaced" );
+        return 0;
+    }
+    else
+    if (argc > 1)
+        n = atoi( argv[1] );
+
+    cdlring_dump( n );
+    return 0;
+#endif
+}
+
 int devlist_cmd( int argc, char* argv[], char* cmdline )
 {
     DEVBLK*   dev;

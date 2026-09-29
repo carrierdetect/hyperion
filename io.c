@@ -41,6 +41,7 @@
 #define _HENGINE_DLL_
 
 #include "hercules.h"
+#include "cdlring.h"
 #include "opcode.h"
 #include "inline.h"
 #include "chsc.h"
@@ -278,6 +279,7 @@ PMCW    pmcw;                           /* Path management ctl word  */
             dev->attnscsw.flag3 & SCSW3_SC_PEND
         )
         {
+            CDLR( dev, CDLR_MSCH_REFUSE, 1, (pmcw.flag5 & PMCW5_E) ? 1 : 0 );
             PTIO( ERR, "*MSCH" );
             regs->psw.cc = 1;
             RELEASE_DEVLOCK( dev );
@@ -287,6 +289,7 @@ PMCW    pmcw;                           /* Path management ctl word  */
         /* Condition code 2 if subchannel is busy */
         if (dev->busy || IOPENDING( dev ))
         {
+            CDLR( dev, CDLR_MSCH_REFUSE, 2, (pmcw.flag5 & PMCW5_E) ? 1 : 0 );
             PTIO( ERR, "*MSCH" );
             regs->psw.cc = 2;
             RELEASE_DEVLOCK( dev );
@@ -307,6 +310,8 @@ PMCW    pmcw;                           /* Path management ctl word  */
         /* Update the ISC and A fields */
         dev->pmcw.flag4 &=              ~(PMCW4_ISC | PMCW4_A);
         dev->pmcw.flag4 |= (pmcw.flag4 & (PMCW4_ISC | PMCW4_A));
+
+        CDLR( dev, CDLR_MSCH_OK, 0, (pmcw.flag5 & PMCW5_E) ? 1 : 0 );
 
         /* Update the path management (LPM and POM) fields */
         dev->pmcw.lpm = pmcw.lpm;

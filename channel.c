@@ -39,6 +39,7 @@ DISABLE_GCC_UNUSED_FUNCTION_WARNING;
 #define _HENGINE_DLL_
 
 #include "hercules.h"
+#include "cdlring.h"
 #include "devtype.h"
 #include "opcode.h"
 #include "chsc.h"
@@ -1757,6 +1758,13 @@ test_subchan_clear(DEVBLK* dev, SCSW* scsw)
     /* Ensure old DEVBLK status bits are maintained */
     subchannel_interrupt_queue_cleanup(dev);
 
+    /* A TEST SUBCHANNEL that stores nothing is invisible at the IRB-copy site,
+       because that line is only reached when there is a status to copy -- and
+       it is the case that matters: cio_commit_config() abandons an enable
+       outright when its TSCH after a cc=1 finds nothing to retrieve. */
+    if (cc)
+        CDLR( dev, CDLR_TSCH_EMPTY, (BYTE)cc, 0 );
+
     /* Return completion code */
     return (cc);
 }
@@ -1828,6 +1836,12 @@ test_subchan_locked (REGS* regs, DEVBLK* dev,
 
     /* Copy the SCSW to the IRB */
     irb->scsw = **scsw;
+
+    /* Record what the guest is handed, not what is left behind afterwards.
+       test_subchan_clear() runs a few lines below and clears the function
+       control, so recording after it showed flag2=00 every time and hid the
+       one thing worth knowing: whether the status carried the halt function. */
+    CDLR( dev, CDLR_TSCH_STORE, 0, (*scsw)->flag2 );
 
     /* Clear the ESW and ECW in the IRB */
     switch (status)
@@ -1975,6 +1989,8 @@ perform_clear_subchan (DEVBLK *dev)
         dev->pmcw.pom = 0xFF;
         dev->pmcw.lpum = 0x00;
         dev->pmcw.pnom = 0x00;
+
+        CDLR( dev, CDLR_CSCH, 0, 0 );
 
         /* [15.3.3] Perform clear function signaling and completion */
         dev->scsw.flag0 = 0;
@@ -2190,6 +2206,7 @@ perform_halt_and_release_lock (DEVBLK *dev)
 
         /* Mark pending interrupt */
         dev->scsw.flag3 |= SCSW3_SC_PEND;
+        CDLR( dev, CDLR_HALT_QUEUE, 0, 0 );
     }
 
     /* Trace HALT */
@@ -2392,6 +2409,8 @@ int halt_subchan( REGS* regs, DEVBLK* dev)
         || dev->suspended
     )
     {
+        CDLR( dev, CDLR_HSCH, 0, 0 );
+
         /* Set halt condition and reset pending condition */
         dev->scsw.flag2 |= (SCSW2_FC_HALT | SCSW2_AC_HALT);
         dev->scsw.flag3 &= ~SCSW3_SC_PEND;
@@ -3099,6 +3118,8 @@ int cc;                                 /* Return code               */
             dev->scsw.flag2 |= SCSW2_AC_RESUM;
             cc = schedule_ioq(NULL, dev);
         }
+
+        CDLR( dev, CDLR_RSCH, (BYTE)cc, 0 );
 
         /* If tracing, write trace message */
         if (dev->ccwtrace)
@@ -4698,6 +4719,8 @@ IOBUF iobuf_initial;                    /* Channel I/O buffer        */
         {
             int keep_pend = (dev->scsw.flag2 & SCSW2_FC_HALT) ? 1 : 0;
 
+            CDLR( dev, keep_pend ? CDLR_RESUME_KEEP : CDLR_RESUME, 0, 0 );
+
             dev->scsw.flag2 &= ~SCSW2_AC_RESUM;
             dev->scsw.flag3 &= ~(SCSW3_AC_SUSP  |
                                  SCSW3_SC_ALERT |
@@ -5242,6 +5265,7 @@ execute_halt:
                         dev->scsw.flag3 &= ~(SCSW3_AC_SCHAC |
                                              SCSW3_AC_DEVAC);
                         dev->scsw.flag3 |= SCSW3_AC_SUSP;
+                        CDLR( dev, CDLR_SUSPEND, 0, 0 );
                         /* Principles violation. Some operating systems use
                          * CLI to check for suspend, intermediate and pending
                          * status (x'29') instead of the Principles statement

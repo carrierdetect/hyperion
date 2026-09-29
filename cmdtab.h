@@ -462,6 +462,20 @@
   "If no arguments are given then the same arguments are used\n"                \
   "as were used the last time the device was created/initialized.\n"
 
+#define cdlring_cmd_desc        "Dump the channel trace ring (diagnostic)"
+#define cdlring_cmd_help        \
+    "Format: cdlring [ <n> | all | dev <a> <b> ]\n"                        \
+    "\n"                                                                    \
+    "  <n>    dump the last <n> entries (default 512)\n"                    \
+    "  all    dump every entry the ring still holds\n"                      \
+    "  dev    replace the two subchannels being recorded\n"                 \
+    "\n"                                                                    \
+    "The ring records a handful of stores per channel event so that a race\n"\
+    "can be watched without being moved; a formatted log write on those\n"  \
+    "paths costs enough to change which way the race goes. Only devices in\n"\
+    "the watch list are recorded, because a busy subchannel would fill the\n"\
+    "ring with routine traffic. Built only with -DCDLRING.\n"
+
 #define devlist_cmd_desc        "List device, device class, or all devices"
 #define devlist_cmd_help        \
                                 \
@@ -1960,6 +1974,7 @@ COMMAND( "cpu",                     cpu_cmd,                SYSCMD,             
 COMMAND( "define",                  define_cmd,             SYSCMD,             define_cmd_desc,        define_cmd_help     )
 COMMAND( "detach",                  detach_cmd,             SYSCMD,             detach_cmd_desc,        detach_cmd_help     )
 COMMAND( "devinit",                 devinit_cmd,            SYSCMD,             devinit_cmd_desc,       devinit_cmd_help    )
+COMMAND( "cdlring",                 cdlring_cmd,            SYSCMD,             cdlring_cmd_desc,       cdlring_cmd_help    )
 COMMAND( "devlist",                 devlist_cmd,            SYSCMD,             devlist_cmd_desc,       devlist_cmd_help    )
 COMMAND( "fcb",                     fcb_cmd,                SYSCMD,             fcb_cmd_desc,           fcb_cmd_help        )
 COMMAND( "cctape",                  cctape_cmd,             SYSCMD,             cctape_cmd_desc,        cctape_cmd_help     )
