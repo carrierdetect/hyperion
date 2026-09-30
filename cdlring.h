@@ -17,7 +17,7 @@
 #ifndef _CDLRING_H
 #define _CDLRING_H
 
-#define CDLRING_SIZE   8192          /* entries, power of two */
+#define CDLRING_SIZE  32768          /* entries, power of two */
 
 /* Event codes. Keep them stable: the dump prints the number, and logs from
    different builds get compared. */
@@ -36,6 +36,7 @@
 #define CDLR_LCS_START   13          /* LCS STARTUP: buffer state on entry   */
 #define CDLR_LCS_HALT    14          /* LCS halt/clear: buffer state         */
 #define CDLR_LCS_READ    15          /* LCS read entry: buffer state         */
+#define CDLR_LCS_CCW     16          /* LCS CCW dispatched, aux = opcode     */
 
 #ifdef CDLRING
 

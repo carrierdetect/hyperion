@@ -100,6 +100,7 @@ static const char* cdlr_evtname( BYTE evt )
         case CDLR_LCS_START:   return "lcs-start";
         case CDLR_LCS_HALT:    return "lcs-halt ";
         case CDLR_LCS_READ:    return "lcs-read ";
+        case CDLR_LCS_CCW:     return "lcs-ccw  ";
         default:               return "?        ";
     }
 }
