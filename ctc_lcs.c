@@ -17,6 +17,29 @@
 #include "tuntap.h"
 #include "opcode.h"
 #include "herc_getopt.h"
+#include "cdlring.h"
+
+/* Record the LCS frame buffer state against the READ subchannel, which is
+   the one the trace ring watches. cc carries the three state bits and aux
+   the command code of the frame sitting at offset 0, which says whose reply
+   is still there -- a SHUTDOWN left by probe reads differently from a
+   STARTUP left by a previous attempt. iFrameOffset does not fit a BYTE; its
+   being nonzero is what discriminates, and that is bit 2. */
+#if defined( CDLRING )
+  #define LCS_RING( pLCSDEV, evt )                                        \
+    do {                                                                  \
+        DEVBLK* _rd = (pLCSDEV)->pDEVBLK[ LCS_READ_SUBCHANN ];            \
+        if (_rd)                                                          \
+            CDLR( _rd, (evt),                                             \
+                  (BYTE)( ((pLCSDEV)->iFrameOffset  ? 4 : 0)              \
+                        | ((pLCSDEV)->fReplyPending ? 2 : 0)              \
+                        | ((pLCSDEV)->fDataPending  ? 1 : 0) ),           \
+                  (BYTE)( (pLCSDEV)->iFrameOffset                         \
+                          ? (pLCSDEV)->bFrameBuffer[4] : 0xFF ) );        \
+    } while (0)
+#else
+  #define LCS_RING( pLCSDEV, evt )   do {} while (0)
+#endif
 
 #define MAX_TRACE_LEN      128
 #define FROM_GUEST         '<'
@@ -1606,6 +1629,8 @@ static void  LCS_Startup( PLCSDEV pLCSDEV, PLCSCMDHDR pCmdFrame, int iCmdLen )
     PLCSSTRTFRM pLCSSTRTFRM = (PLCSSTRTFRM)&Reply;
     U16         iOrigMaxFrameBufferSize;
 
+    LCS_RING( pLCSDEV, CDLR_LCS_START );
+
     INIT_REPLY_FRAME( pLCSSTRTFRM, iReplyLen, pCmdFrame, iCmdLen );
 
     pLCSSTRTFRM->bLCSCmdHdr.bLanType      = LCS_FRMTYP_ENET;
@@ -2954,6 +2979,7 @@ static void lcs_halt_or_clear( DEVBLK* pDEVBLK )
                              failed with rc=-22 */
         if (pLCSDEV->pDEVBLK[ LCS_READ_SUBCHANN ] == pDEVBLK)
         {
+            LCS_RING( pLCSDEV, CDLR_LCS_HALT );
             pLCSDEV->fHaltOrClear = 1;
             signal_condition( &pLCSDEV->DevEvent );
         }
@@ -2985,6 +3011,8 @@ void  LCS_Read( DEVBLK* pDEVBLK,   U32   sCount,
     // to determine whether they do or not). -- Fish
 
     PTT_DEBUG( "READ: ENTRY       ", 000, pDEVBLK->devnum, -1 );
+
+    LCS_RING( pLCSDEV, CDLR_LCS_READ );
 
     for (;;)
     {

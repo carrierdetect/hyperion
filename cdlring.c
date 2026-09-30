@@ -97,6 +97,9 @@ static const char* cdlr_evtname( BYTE evt )
         case CDLR_RSCH:        return "rsch     ";
         case CDLR_CSCH:        return "csch     ";
         case CDLR_STALE:       return "stale    ";
+        case CDLR_LCS_START:   return "lcs-start";
+        case CDLR_LCS_HALT:    return "lcs-halt ";
+        case CDLR_LCS_READ:    return "lcs-read ";
         default:               return "?        ";
     }
 }

@@ -33,6 +33,9 @@
 #define CDLR_RSCH        10          /* RESUME SUBCHANNEL, cc in the cc field*/
 #define CDLR_CSCH        11          /* CLEAR SUBCHANNEL                     */
 #define CDLR_STALE       12          /* parked program disowned as stale     */
+#define CDLR_LCS_START   13          /* LCS STARTUP: buffer state on entry   */
+#define CDLR_LCS_HALT    14          /* LCS halt/clear: buffer state         */
+#define CDLR_LCS_READ    15          /* LCS read entry: buffer state         */
 
 #ifdef CDLRING
 
