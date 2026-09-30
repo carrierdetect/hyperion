@@ -706,9 +706,6 @@ void  LCS_ExecuteCCW( DEVBLK* pDEVBLK, BYTE  bCode,
     UNREFERENCED( bChained  );
     UNREFERENCED( bPrevCode );
 
-    /* Every CCW dispatched to an LCS device, against its own devnum so the
-       read and write subchannels stay distinguishable in the ring. */
-    CDLR( pDEVBLK, CDLR_LCS_CCW, 0, bCode );
     UNREFERENCED( iCCWSeq   );
 
     pLCSDEV = (PLCSDEV)pDEVBLK->dev_data;

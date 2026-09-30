@@ -2180,6 +2180,14 @@ perform_halt_and_release_lock (DEVBLK *dev)
         dev->scsw.flag2 |= SCSW2_FC_HALT;
         dev->scsw.flag2 &= ~SCSW2_AC_HALT;
 
+        /* A halt terminates the channel program, so it retires that program's
+           generation the same way a clear does. The clear of SCSW2_AC_HALT
+           just above happens BEFORE the halted device thread has returned
+           from its device handler, which is what makes the halt unobservable
+           to that thread: it tests the flag afterwards and finds it already
+           gone. The generation cannot be erased that way. */
+        dev->chpgen++;
+
         /* If intermediate status pending with subchannel and device
          * active, reset intermediate status pending (HSCH, fifth
          * paragraph).
@@ -6108,6 +6116,38 @@ breakchain:
                 }
             }
         }
+
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+        /* Publish nothing for a channel program that has already been
+           terminated.
+         *
+         * A device handler with a blocking read returns here after a halt woke
+         * it, with unitstat = 0 because the halt is not a device status. The
+         * test below then sets chain = 0, the loop ends, and the final sequence
+         * publishes SC_PRI | SC_SEC | SC_PEND plus SC_ALERT -- alert because a
+         * zero unit status is not channel end plus device end. That status is a
+         * second completion for a program whose halt completion has already
+         * been queued and consumed, and by the time it is published the guest
+         * may have issued a new START SUBCHANNEL, so it lands on the new
+         * program and reports it as ended before it ever reached the device.
+         *
+         * This test is here and not only at the top of the loop because a
+         * thread on this path never reaches the top of the loop again: it is
+         * returning from inside a CCW, and chain goes to zero below. The
+         * loop-top test cannot see it.
+         *
+         * Exit quietly: the halt or clear has published its own completion
+         * already, and the busy indications may by now belong to the newer
+         * program. Call the end exit, which the normal path below would
+         * otherwise have called.
+         */
+        if (dev->chpgen != mygen)
+        {
+            if (dev->hnd->end) (dev->hnd->end)( dev );
+            CDLR( dev, CDLR_STALE, 2, unitstat );
+            return execute_ccw_chain_fast_return( iobuf, &iobuf_initial, NULL );
+        }
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
 
         /* Terminate the channel program if any unusual status */
         if (chanstat != 0
