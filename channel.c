@@ -1841,7 +1841,11 @@ test_subchan_locked (REGS* regs, DEVBLK* dev,
        test_subchan_clear() runs a few lines below and clears the function
        control, so recording after it showed flag2=00 every time and hid the
        one thing worth knowing: whether the status carried the halt function. */
-    CDLR( dev, CDLR_TSCH_STORE, 0, (*scsw)->flag2 );
+    /* unitstat in cc, chanstat in aux: the record already carries flag2 and
+       flag3 in their own columns, so the aux this used to duplicate was free.
+       A channel-detected error ends a chain before any CCW reaches the
+       device, and chanstat is what names it. */
+    CDLR( dev, CDLR_TSCH_STORE, (*scsw)->unitstat, (*scsw)->chanstat );
 
     /* Clear the ESW and ECW in the IRB */
     switch (status)
