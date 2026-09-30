@@ -4609,6 +4609,10 @@ u_int   bufpos = 0;                     /* Position in I/O buffer    */
 u_int   skip_ccws = 0;                  /* Skip ccws                 */
 int     cmdretry = 255;                 /* Limit command retry       */
 U32     prevccwaddr = 1;                /* Previous CCW address      */
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+U32     mygen = 0;                      /* dev->chpgen when this chain
+                                           began executing           */
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
 U32     prefetch_remaining;             /* Prefetch bytes remaining  */
 
 u_int       ps = 0;                     /* Local prefetch sequence   */
@@ -4667,6 +4671,12 @@ IOBUF iobuf_initial;                    /* Channel I/O buffer        */
 
     set_subchannel_busy(dev);
     dev->startpending = 0;
+
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+    /* Remember which generation this chain belongs to, so that the loop below
+       can tell if a clear retires it while it is running */
+    mygen = dev->chpgen;
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
 
     /* Increment excp count */
     dev->excps++;
@@ -4871,6 +4881,36 @@ resume_suspend:
     /* On entry : No locks held */
     while ( chain )
     {
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+        /* Abandon a chain that CLEAR SUBCHANNEL has already completed.
+         *
+         * The test below cannot see a clear issued by clear_subchan(). That
+         * function sets SCSW2_AC_CLEAR to signal this thread and then calls
+         * perform_clear_subchan() in the same critical section, which clears
+         * the whole of SCSW2_AC again -- so the signal is set and erased under
+         * one acquisition of the device lock, and a thread executing a chain
+         * never observes it. The chain runs on past a clear that has already
+         * been reported complete to the guest, and goes on making the
+         * subchannel busy and status pending underneath it.
+         *
+         * The generation number is not erasable in that way. perform_clear_-
+         * subchan() bumps it, so a mismatch here means this chain was retired
+         * while it was running.
+         *
+         * Exit quietly rather than through execute_clear: the clear has
+         * already been performed and its interrupt already queued, and doing
+         * it a second time would present the guest a second completion. Do not
+         * touch the busy indications either -- perform_clear_subchan() dropped
+         * them, and by now they may belong to a newer chain.
+         */
+        if (dev->chpgen != mygen)
+        {
+            if (dev->hnd->end) (dev->hnd->end)( dev );
+            CDLR( dev, CDLR_STALE, 1, 0 );
+            return execute_ccw_chain_fast_return( iobuf, &iobuf_initial, NULL );
+        }
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
+
         /* Test for clear subchannel request or system shutdown */
         if (dev->scsw.flag2 & SCSW2_AC_CLEAR ||
             sysblk.shutdown)
