@@ -1992,6 +1992,19 @@ perform_clear_subchan (DEVBLK *dev)
 
         CDLR( dev, CDLR_CSCH, 0, 0 );
 
+        /* Terminate the channel program.
+         *
+         * A clear leaves no channel program, so a program parked on a
+         * suspend CCW must not be resumed afterwards. Clearing dev->suspended
+         * here is not enough on its own: a device thread may already have been
+         * queued for this device before the clear, and it re-enters
+         * execute_ccw_chain with nothing to tell it that what it was queued
+         * for no longer exists. Bumping the generation lets it find out. The
+         * parked state itself is left alone so the stale chain can still
+         * recognise and disown it.
+         */
+        dev->chpgen++;
+
         /* [15.3.3] Perform clear function signaling and completion */
         dev->scsw.flag0 = 0;
         dev->scsw.flag1 = 0;
@@ -4616,6 +4629,33 @@ IOBUF iobuf_initial;                    /* Channel I/O buffer        */
 
     OBTAIN_DEVLOCK( dev );
 
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+    /* Disown a parked channel program that has since been terminated.
+     *
+     * CLEAR SUBCHANNEL bumps dev->chpgen. If a device thread was already
+     * queued for this device when that happened, it arrives here to resume a
+     * program the guest has cleared, and resuming it makes the subchannel
+     * start pending with the subchannel and device active again -- under a
+     * guest that has just stopped it, and which may by then have disabled it
+     * and be trying to enable it once more. MODIFY SUBCHANNEL then refuses the
+     * enable as busy, five times, and Linux's cio_commit_config() gives up
+     * without committing the control word, so every later START SUBCHANNEL
+     * fails EINVAL on the stale enable bit without reaching the emulator.
+     *
+     * This must come before set_subchannel_busy() and before SCSW2_FC_START is
+     * set below, because those two are precisely the state that has to not
+     * appear. It also must not clear the busy indications: they were never set
+     * by this call, and by now they may belong to a new channel program.
+     */
+    if ((dev->suspended || dev->resumesuspended) && dev->ccwgen != dev->chpgen)
+    {
+        dev->suspended = dev->resumesuspended = 0;
+        CDLR( dev, CDLR_STALE, 0, 0 );
+        RELEASE_DEVLOCK( dev );
+        return execute_ccw_chain_fast_return( iobuf, &iobuf_initial, NULL );
+    }
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
+
 #if defined( OPTION_SHARED_DEVICES )
     /* Wait for the device to become available */
     if (dev->shareable)
@@ -5303,6 +5343,11 @@ execute_halt:
                         dev->idawfmt = idawfmt;
                         dev->ccwfmt = ccwfmt;
                         dev->ccwkey = ccwkey;
+#if defined( FEATURE_CHANNEL_SUBSYSTEM )
+                        /* Stamp the parked program, so that a resume can tell
+                           whether it is still the program it was queued for */
+                        dev->ccwgen = dev->chpgen;
+#endif /*defined( FEATURE_CHANNEL_SUBSYSTEM )*/
 
                         /* Turn on the "suspended" bit.  This enables remote
                          * systems to use the device while we're waiting

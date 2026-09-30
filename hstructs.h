@@ -1444,6 +1444,12 @@ struct DEVBLK {                         /* Device configuration block*/
         BYTE    idawfmt;
         BYTE    ccwfmt;
         BYTE    ccwkey;
+        U32     chpgen;                 /* Channel program generation;
+                                           bumped whenever a channel
+                                           program is terminated     */
+        U32     ccwgen;                 /* chpgen as it was when this
+                                           program parked on a
+                                           suspend CCW               */
 
         /*  device handler function pointers...                      */
 

@@ -32,6 +32,7 @@
 #define CDLR_RESUME_KEEP  9          /* ...and it kept a pending halt status */
 #define CDLR_RSCH        10          /* RESUME SUBCHANNEL, cc in the cc field*/
 #define CDLR_CSCH        11          /* CLEAR SUBCHANNEL                     */
+#define CDLR_STALE       12          /* parked program disowned as stale     */
 
 #ifdef CDLRING
 

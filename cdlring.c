@@ -96,6 +96,7 @@ static const char* cdlr_evtname( BYTE evt )
         case CDLR_RESUME_KEEP: return "resume-kp";
         case CDLR_RSCH:        return "rsch     ";
         case CDLR_CSCH:        return "csch     ";
+        case CDLR_STALE:       return "stale    ";
         default:               return "?        ";
     }
 }
