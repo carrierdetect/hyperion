@@ -49,9 +49,20 @@ the ones worth a look regardless of what you run on.
 | `49152ec668` | **LCS loses a Halt Subchannel** that arrives between reads, so the device stops responding. |
 | `3e57da7f5c` | **The 1052/3215 console loses a `/command`**, and loses the attention interrupt too, when input arrives while it is busy. A one-slot buffer. |
 | `d6f6ea2d91` | **`ckddasd` dereferences `dev->ckdcu` without checking it.** |
+| `1abfbac0` | **CLEAR SUBCHANNEL does not stop a channel program parked on a suspend CCW**, so a device thread queued before the clear resumes it afterwards and the subchannel goes active under a guest that has just cleared and disabled it. |
+| `3b8ef260` | **The chain executor's per-CCW test for a clear is dead code**: `clear_subchan()` sets the signalling bit and `perform_clear_subchan()` clears it again in the same critical section. |
+| `48af8982` | **A halted channel program publishes a second ending status.** A handler blocking in a read returns with no unit status, the halt test finds its flag already cleared, and the normal chain end synthesises alert status onto what may already be the guest's next program. |
 
 None of these mention `__GENODE__`; they were found here because this port
 stresses those paths, but the fault is in the common code.
+
+The last three are one defect at three sites: a flag used to signal the device
+thread that its channel program has been terminated, erased by the code that
+completes the termination before the thread can observe it. Written up for that
+project's maintainers, prose and no diff, in the companion repository under
+`upstream/hercules/03-clear-and-halt-do-not-stop-the-chain.md`. Affects any guest
+that suspends a channel program or halts a device handler that blocks in a read,
+which in-tree is LCS, CTCI, QETH and the 3270.
 
 ### Genode platform support — guarded on `__GENODE__`, inert elsewhere
 
@@ -79,7 +90,7 @@ cross, and removing it removes the addressing and the connection state with it.
 
 ## What this fork is not
 
-It is **not** a proposed upstream series and has not been submitted. The three
+It is **not** a proposed upstream series and has not been submitted. The six
 platform-independent fixes above are the only part written with that in mind;
 everything else is specific to running under Genode. Issues and pull requests
 here are welcome but this is not upstream — file Hercules bugs with
