@@ -251,32 +251,11 @@ PMCW    pmcw;                           /* Path management ctl word  */
     /* Obtain the device lock */
     OBTAIN_DEVLOCK( dev );
     {
-        /* Condition code 1 if the subchannel is status pending.
-         *
-         * SA22-7832-09, MODIFY SUBCHANNEL, Condition Code 1
-         *
-         * All three status words, and no exclusion for intermediate status: a
-         * subchannel that is status pending with intermediate status is status
-         * pending, and this is the same test RESUME SUBCHANNEL applies.
-         *
-         * The distinction is not cosmetic. A guest told cc=1 issues TEST
-         * SUBCHANNEL, clears the status and retries, and succeeds. A guest told
-         * cc=2 has no such recourse: Linux's cio_commit_config() waits 100
-         * microseconds and retries, five times, then gives up WITHOUT
-         * committing the new path-management control word -- so an enable
-         * refused as busy is an enable silently lost, and every later START
-         * SUBCHANNEL fails -EINVAL on the stale pmcw.ena.
-         *
-         * Reported by the Linux lcs driver, whose write subchannel is normally
-         * parked on a suspend bit with status 0x29 (suspended, intermediate,
-         * status pending) exactly when the guest takes the device offline and
-         * back online:
-         *
-         *     lcs 0.0.0e20: Starting an LCS device resulted in an error, rc=-22!
-         */
-        if (dev->scsw.flag3     & SCSW3_SC_PEND ||
-            dev->pciscsw.flag3  & SCSW3_SC_PEND ||
-            dev->attnscsw.flag3 & SCSW3_SC_PEND
+        /* Condition code 1 if subchannel is status pending
+           with other than intermediate status */
+        if (1
+            &&  (dev->scsw.flag3 & SCSW3_SC_PEND)
+            && !(dev->scsw.flag3 & SCSW3_SC_INTER)
         )
         {
             CDLR( dev, CDLR_MSCH_REFUSE, 1, (pmcw.flag5 & PMCW5_E) ? 1 : 0 );
