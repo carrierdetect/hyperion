@@ -46,9 +46,9 @@ the ones worth a look regardless of what you run on.
 
 | commit | what |
 |---|---|
-| `49152ec668` | **LCS loses a Halt Subchannel** that arrives between reads, so the device stops responding. |
-| `3e57da7f5c` | **The 1052/3215 console loses a `/command`**, and loses the attention interrupt too, when input arrives while it is busy. A one-slot buffer. |
-| `d6f6ea2d91` | **`ckddasd` dereferences `dev->ckdcu` without checking it.** |
+| `c37ce847` | **LCS loses a Halt Subchannel** that arrives between reads, so the device stops responding. |
+| `92dac634` | **The 1052/3215 console loses a `/command`**, and loses the attention interrupt too, when input arrives while it is busy. A one-slot buffer. |
+| `3a61e5f2` | **`ckddasd` dereferences `dev->ckdcu` without checking it.** |
 | `1abfbac0` | **CLEAR SUBCHANNEL does not stop a channel program parked on a suspend CCW**, so a device thread queued before the clear resumes it afterwards and the subchannel goes active under a guest that has just cleared and disabled it. |
 | `3b8ef260` | **The chain executor's per-CCW test for a clear is dead code**: `clear_subchan()` sets the signalling bit and `perform_clear_subchan()` clears it again in the same critical section. |
 | `48af8982` | **A halted channel program publishes a second ending status.** A handler blocking in a read returns with no unit status, the halt test finds its flag already cleared, and the normal chain end synthesises alert status onto what may already be the guest's next program. |
@@ -66,22 +66,22 @@ which in-tree is LCS, CTCI, QETH and the 3270.
 
 ### Genode platform support — guarded on `__GENODE__`, inert elsewhere
 
-`b4518693fe` `hostopts.h` · `eefe5b106b` `hscutl.c` · `9180be94cc` static HDL
-module support for a platform with no `dlopen` · `8a51ef8cd9` read operator
-commands from stdin only when there is one · `7fec54d9ca` derive the TOD clock
-from Genode's interpolated clock rather than the libc's · `a91c41d5c5`
-`socket_is_socket()` · `1f90e663a5` make the Nic session's MAC authoritative
-for LCS · `1537951ef2` exclude `struct rtentry` from `CTLREQ`.
+`665f6d3c` `hostopts.h` · `7c0b3bab` `hscutl.c` · `1631976f` static HDL
+module support for a platform with no `dlopen` · `8cb1bd0a` read operator
+commands from stdin only when there is one · `0ba6fc61` derive the TOD clock
+from Genode's interpolated clock rather than the libc's · `85b2b6a7`
+`socket_is_socket()` · `c082c94d` make the Nic session's MAC authoritative
+for LCS · `a31b9117` exclude `struct rtentry` from `CTLREQ`.
 
-`9180be94cc` may be of wider interest: it is static HDL module linking for any
+`1631976f` may be of wider interest: it is static HDL module linking for any
 platform without `dlopen`, not only this one.
 
 ### New device forms for this deployment — guarded
 
 | commit | what |
 |---|---|
-| `755bb620c6` | `0600 CTCT lpar=b` — a CTC between two emulated machines on one host, over a Genode crosslink instead of TCP. |
-| `0785e84ab4` | `0090 tcpnje 2703 lnode=A rnode=B lpar=b` — the same for NJE's BSC line. |
+| `87421f7c` | `0600 CTCT lpar=b` — a CTC between two emulated machines on one host, over a Genode crosslink instead of TCP. |
+| `0e5be0ed` | `0090 tcpnje 2703 lnode=A rnode=B lpar=b` — the same for NJE's BSC line. |
 
 Both are **additional** forms, not replacements: `CTC_TCP=1` / `NJE_TCP=1` at
 build time restore the TCP path, which remains the only way to reach a Hercules
