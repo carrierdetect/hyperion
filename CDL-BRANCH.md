@@ -71,10 +71,22 @@ module support for a platform with no `dlopen` · `8cb1bd0a` read operator
 commands from stdin only when there is one · `0ba6fc61` derive the TOD clock
 from Genode's interpolated clock rather than the libc's · `85b2b6a7`
 `socket_is_socket()` · `c082c94d` make the Nic session's MAC authoritative
-for LCS · `a31b9117` exclude `struct rtentry` from `CTLREQ`.
+for LCS · `a31b9117` exclude `struct rtentry` from `CTLREQ` · `a44f8a04` a
+weak `herc_log_sink()` hook in `flog_write()`.
 
 `1631976f` may be of wider interest: it is static HDL module linking for any
 platform without `dlopen`, not only this one.
+
+`a44f8a04` is worth a sentence because the obvious alternative does not work.
+On this platform Hercules' message stream IS the machine's one shared serial
+log, so a channel trace has to be taken OUT of it -- 1,277,645 bytes in one
+measured window, 87% of what that line can carry. `registerLogCallback()`
+cannot do that: it is driven from `log_read()` on the logger's circular
+buffer, downstream of the logger thread that has already written those bytes
+to the log, it hands over byte ranges on no line boundary, and registering one
+makes `impl()` return ahead of the No-UI path. The hook is instead one weak
+symbol offered each formatted message in `flog_write()`, returning how many
+bytes it took from the front; a build without the symbol is unchanged.
 
 ### New device forms for this deployment — guarded
 
