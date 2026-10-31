@@ -308,6 +308,45 @@ static void _flog_write_pipe( FILE* f, const char* msg )
 }
 
 
+#if defined( __GENODE__ )
+/*-------------------------------------------------------------------*/
+/*            A PORT-PROVIDED SINK FOR TRACE-CLASS MESSAGES          */
+/*-------------------------------------------------------------------*/
+/*                                                                   */
+/* Hercules has one message stream, with channel-program trace lines */
+/* interleaved with the messages an operator is watching for. On a   */
+/* platform where that stream IS the machine's one shared log -- a   */
+/* Genode component writes to a LOG session, which on the hardware   */
+/* this port runs on reaches an operator over a serial line at       */
+/* 11,520 bytes a second, shared with every other component -- a     */
+/* channel trace is not merely noisy: 1,277,645 bytes of it were     */
+/* measured inside a single window, which is 87% of everything that  */
+/* line could carry in the time.                                     */
+/*                                                                   */
+/* So the port may supply a sink. It is given each formatted message */
+/* on its way to the logger pipe and returns how many bytes it took  */
+/* from the FRONT; whatever is left is written to the pipe as usual.  */
+/* A byte count rather than a yes or no because one displayed line    */
+/* can be many calls to this function -- a device driver's hex dump   */
+/* prints a byte at a time -- so a chunk can hold the end of one line */
+/* and the start of another.                                         */
+/*                                                                   */
+/* WEAK, and deliberately the only coupling: a build of this platform */
+/* without the port's sink object links with the symbol at NULL and   */
+/* behaves exactly as every other platform does. The alternative      */
+/* considered first was registerLogCallback(), which cannot do this   */
+/* job: it is driven from log_read() on the logger's circular buffer, */
+/* DOWNSTREAM of the logger thread that has already written the same  */
+/* bytes to the log, and registering one makes impl() return ahead of */
+/* the No-UI path and hand the main loop to the caller.               */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+
+extern size_t herc_log_sink( const char* msg, size_t len )
+       __attribute__(( weak ));
+
+#endif /* defined( __GENODE__ ) */
+
 /*-------------------------------------------------------------------*/
 /*                           flog_write                              */
 /*-------------------------------------------------------------------*/
@@ -356,7 +395,17 @@ static void flog_write( int panel, FILE* f, const char* msg )
 
     /* If write to panel wanted, send message through logmsg pipe */
     if ((panel & WRMSG_PANEL) && !wrmsg_quiet)
+    {
+#if defined( __GENODE__ )
+        size_t  len   = strlen( msg );
+        size_t  taken = herc_log_sink ? herc_log_sink( msg, len ) : 0;
+
+        if (taken < len)
+            _flog_write_pipe( f, msg + taken );
+#else
         _flog_write_pipe( f, msg );
+#endif
+    }
 
     /* Capture this message if capturing is active for this thread */
     if (pCAPTCTL)
