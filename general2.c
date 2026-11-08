@@ -529,7 +529,7 @@ VADR    effective_addr2,
         if(regs->psw.cc && sysblk.cpus > 1)
         {
             PTT_CSF("*PLO",regs->GR_L(0),regs->GR_L(r1),regs->psw.IA_L);
-            CDLMP( regs, CDLMP_PLO );
+            CDLMP_HIT( regs, CDLMP_PLO );
             sched_yield();
         }
     }
@@ -1821,7 +1821,7 @@ BYTE    old;                            /* Old value                 */
 #endif
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_TS );
+                CDLMP_HIT( regs, CDLMP_TS );
                 sched_yield();
             }
     }

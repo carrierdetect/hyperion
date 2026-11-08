@@ -2524,7 +2524,7 @@ U64     new;                            /* new value                 */
 #endif /*defined(_FEATURE_ZSIE)*/
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
     }
@@ -2592,7 +2592,7 @@ U64     newhi, newlo;                   /* new value                 */
 #endif
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
     }
@@ -7581,7 +7581,7 @@ U32     old;                            /* old value                 */
 #endif /*defined(_FEATURE_SIE)*/
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
     }
@@ -7645,7 +7645,7 @@ U64     old, new;                       /* old, new values           */
 #endif /*defined(_FEATURE_SIE)*/
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
     }

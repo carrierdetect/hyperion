@@ -36,6 +36,15 @@
  * and "does the binary contain the CDLMP strings" is the deploy check -- the
  * same discipline cdlring.h records, for the same reason.
  *
+ * AND THE PER-REGS MACRO IS CDLMP_HIT, NOT CDLMP, WHICH IS NOT COSMETIC.
+ * It was `CDLMP( regs, slot )` for a few hours, and that made this header
+ * define a macro with the same name as the BUILD SWITCH -- so `#ifdef CDLMP`
+ * in cdlmp.c was true because the header had been included, not because the
+ * switch was set. The instrumented build worked by luck; the SHIPPING build
+ * did not compile, because the inert branch below defines `cdlmp_tick()` as
+ * a macro and cdlmp.c then tried to define it as a function. A switch and a
+ * macro must not share a name.
+ *
  * COUNTING IS PER PROCESSOR AND UNLOCKED, ON PURPOSE. Each processor
  * increments its own row and no other, so there is no shared counter to
  * serialise on -- an instrument that took a lock to measure lock contention
@@ -69,14 +78,14 @@ extern volatile U64 cdlmp_cnt[ CDLMP_CPUS ][ CDLMP_SLOTS ];
         cdlmp_cnt[ (_cpuad) & (CDLMP_CPUS - 1) ][ (_slot) ]++;              \
     } while (0)
 
-#define CDLMP( _regs, _slot )   CDLMP_BUMP( (_regs)->cpuad, (_slot) )
+#define CDLMP_HIT( _regs, _slot )  CDLMP_BUMP( (_regs)->cpuad, (_slot) )
 
 extern void cdlmp_tick ( void );     /* once a second from timer_thread */
 
 #else /* !CDLMP */
 
 #define CDLMP_BUMP( _cpuad, _slot )  do { } while (0)
-#define CDLMP( _regs, _slot )        do { } while (0)
+#define CDLMP_HIT( _regs, _slot )    do { } while (0)
 #define cdlmp_tick()                 do { } while (0)
 
 #endif /* CDLMP */

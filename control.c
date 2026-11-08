@@ -975,7 +975,7 @@ U64     new64;                          /* New value (CSPG)          */
 
         if (sysblk.cpus > 1)
         {
-            CDLMP( regs, CDLMP_CSP );
+            CDLMP_HIT( regs, CDLMP_CSP );
             sched_yield();
         }
     }

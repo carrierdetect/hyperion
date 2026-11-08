@@ -2371,7 +2371,7 @@ U32     new;                            /* new value                 */
 
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
         }
@@ -2443,7 +2443,7 @@ U64     old, new;                       /* old, new values           */
 
             if (sysblk.cpus > 1)
             {
-                CDLMP( regs, CDLMP_CS );
+                CDLMP_HIT( regs, CDLMP_CS );
                 sched_yield();
             }
         }
