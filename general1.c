@@ -40,6 +40,7 @@
 
 #include "hercules.h"
 #include "opcode.h"
+#include "cdlmp.h"
 #include "inline.h"
 
 /* When an operation code has unused operand(s) (IPK, e.g.), it will */
@@ -2369,7 +2370,10 @@ U32     new;                            /* new value                 */
             PER_GRA_CHECK( regs, PER_GRA_MASK( r1 ));
 
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
         }
     }
     else
@@ -2438,7 +2442,10 @@ U64     old, new;                       /* old, new values           */
             PER_GRA_CHECK( regs, PER_GRA_MASK2( r1, r1+1 ));
 
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
         }
     }
     else

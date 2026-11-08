@@ -100,6 +100,29 @@ build time restore the TCP path, which remains the only way to reach a Hercules
 on another host. Between two partitions of one machine there is no network to
 cross, and removing it removes the addressing and the connection state with it.
 
+### Diagnostics, compiled out of the shipping binary
+
+Two instruments live in this tree and **neither is in a binary unless it was
+asked for at build time**. Both exist because a `WRMSG` probe, or a log line,
+could not answer the question:
+
+| file | built by | what it answers |
+|---|---|---|
+| `cdlring.c/h` | `-DCDLRING` | a fixed-size in-memory ring of channel events, dumped once by the `cdlring` command. Formatting a probe through the logging path cost enough to MOVE the race being diagnosed: the failure rate of one channel defect ran 1, 4, 5, 6 and 7 in ten purely by where the probes were placed, and one probe set made every run pass. |
+| `cdlmp.c/h` | `-DCDLMP` | nine counters per emulated processor for what a SECOND processor costs: the four failed-lock instructions that call `sched_yield()` (`CS`/`CDS`, `TS`, `PLO`, `CSP`), the storage-key broadcast purge split by whether the other processor was idle or running, and `synchronize_cpus()` split by whether it actually blocked. |
+
+`cdlmp` was added because counting log lines gave a wrong answer with every
+appearance of a right one. Genode's C library warns `sched_yield not
+implemented` **once per component**, so a count of those lines saturates at
+one: four measured windows all read zero, and that was taken as evidence the
+yield sites had stayed cold. They may not have. A saturating counter cannot
+distinguish "it never happened" from "the first one happened earlier", and
+the distinction was the whole question.
+
+The counters are per processor and unlocked, each processor incrementing only
+its own row, padded so that no two share a cache line — an instrument that
+took a lock to measure lock contention would be measuring itself.
+
 ## What this fork is not
 
 It is **not** a proposed upstream series and has not been submitted. The six

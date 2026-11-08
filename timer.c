@@ -15,6 +15,7 @@
 #include "hercules.h"
 
 #include "opcode.h"
+#include "cdlmp.h"
 
 #include "feat390.h"
 #include "feat370.h"
@@ -320,6 +321,14 @@ bool    txf_PPA;                        /* true == PPA assist needed */
             sysblk.siosrate = total_sios;
 
             update_maxrates_hwm(); // (update high-water-mark values)
+
+            /* The multiprocessor-tax counters, if this binary carries them.
+               Hooked HERE and not on a thread of its own: an extra thread
+               would shift every later pthread ordinal, and the Genode port
+               places a partition's emulated processors BY ordinal, so an
+               instrumented build would not be measuring the arrangement the
+               uninstrumented one booted. Inert without -DCDLMP. */
+            cdlmp_tick();
 
         } /* end if (intv_secs >= one_sec) */
 

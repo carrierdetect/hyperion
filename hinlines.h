@@ -8,6 +8,12 @@
 #ifndef _HINLINES_H
 #define _HINLINES_H
 
+/* synchronize_cpus() below is a static inline, so it is compiled into every
+   translation unit that includes this header -- which means the counter
+   macros have to be DEFINED in all of them, inert or not. They are inert
+   unless that object is built with -DCDLMP. */
+#include "cdlmp.h"
+
 /*-------------------------------------------------------------------*/
 /* Define inline assembly style for GNU C compatible compilers */
 
@@ -204,6 +210,8 @@ static inline void synchronize_cpus( REGS* regs, const char* location )
 
     CPU_BITMAP mask = sysblk.started_mask;
 
+    CDLMP_BUMP( HOSTREGS->cpuad, CDLMP_SYNC );
+
     /* Deselect current processor and waiting processors from mask */
     mask &= ~(sysblk.waiting_mask | HOSTREGS->cpubit);
 
@@ -240,6 +248,12 @@ static inline void synchronize_cpus( REGS* regs, const char* location )
      */
     if (n && mask)
     {
+        /* THIS is the serialisation: every other ACTIVE processor has to
+           reach its syncpoint before this one proceeds. The calls that do
+           not get here cost nothing, which is why the two are counted
+           separately. */
+        CDLMP_BUMP( HOSTREGS->cpuad, CDLMP_SYNCW );
+
         sysblk.sync_mask = mask;
         sysblk.syncing   = true;
 

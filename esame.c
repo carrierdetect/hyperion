@@ -29,6 +29,7 @@
 
 #include "hercules.h"
 #include "opcode.h"
+#include "cdlmp.h"
 #include "inline.h"
 #include "clock.h"
 #include "sie.h"
@@ -2522,7 +2523,10 @@ U64     new;                            /* new value                 */
         else
 #endif /*defined(_FEATURE_ZSIE)*/
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
     }
 
 } /* end DEF_INST(compare_and_swap_long) */
@@ -2587,7 +2591,10 @@ U64     newhi, newlo;                   /* new value                 */
         else
 #endif
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
     }
 
 } /* end DEF_INST(compare_double_and_swap_long) */
@@ -7573,7 +7580,10 @@ U32     old;                            /* old value                 */
         else
 #endif /*defined(_FEATURE_SIE)*/
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
     }
 
 } /* end DEF_INST(compare_and_swap_y) */
@@ -7634,7 +7644,10 @@ U64     old, new;                       /* old, new values           */
         else
 #endif /*defined(_FEATURE_SIE)*/
             if (sysblk.cpus > 1)
+            {
+                CDLMP( regs, CDLMP_CS );
                 sched_yield();
+            }
     }
 
 } /* end DEF_INST(compare_double_and_swap_y) */

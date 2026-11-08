@@ -2176,6 +2176,8 @@ do {                                                                  \
      int cpu;        /* CPU being examined */                           \
      REGS* cregs;    /* register context for CPU being examined */      \
                                                                         \
+     CDLMP_BUMP( (_regs)->cpuad, CDLMP_SK );   /* a broadcast purge */   \
+                                                                        \
      /* Do invalidate for all of the other online CPUs too */           \
      for (cpu=0; cpu < sysblk.hicpu; cpu++)                             \
      {                                                                  \
@@ -2187,6 +2189,8 @@ do {                                                                  \
          /* Is this CPU waiting for an interrupt? */                    \
          if (sysblk.waiting_mask & CPU_BIT( cpu ))                      \
          {                                                              \
+           /* The cheap branch: that processor is IDLE */               \
+           CDLMP_BUMP( (_regs)->cpuad, CDLMP_SKI );                     \
            /* Yes, then we can do the invalidate right now... */        \
            switch (cregs->arch_mode)                                    \
            {                                                            \
@@ -2216,6 +2220,9 @@ do {                                                                  \
          }                                                              \
          else /* Otherwise we need to schedule it ... */                \
          {                                                              \
+           /* The dear branch: that processor is RUNNING and is about   \
+              to be forced out of its instruction loop */               \
+           CDLMP_BUMP( (_regs)->cpuad, CDLMP_SKS );                     \
            ON_IC_INTERRUPT( cregs );                                    \
                                                                         \
            if (!cregs->invalidate)                                      \

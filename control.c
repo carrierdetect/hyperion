@@ -43,6 +43,7 @@
 
 #include "hercules.h"
 #include "opcode.h"
+#include "cdlmp.h"
 #include "inline.h"
 #include "sie.h"
 
@@ -973,7 +974,10 @@ U64     new64;                          /* New value (CSPG)          */
         }
 
         if (sysblk.cpus > 1)
+        {
+            CDLMP( regs, CDLMP_CSP );
             sched_yield();
+        }
     }
 
 } /* end compare_and_swap_and_purge_instruction */
